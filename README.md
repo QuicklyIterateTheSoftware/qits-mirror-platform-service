@@ -35,6 +35,59 @@ OCI mirror namespaces with the upstream each fronts. The two npm/maven cache roo
 come from `MirrorRepositorySeeder` at boot instead: a migration prefills static
 platform knowledge, and a seeded repository name is not that.
 
+## Eviction
+
+What keeps a cache from growing forever. Every byte here came from upstream and can
+be fetched again, so the only question worth asking of an entry is whether anything
+still uses it: **an identity unaccessed for longer than its type's window is
+evicted**, and its blobs are reclaimed once no surviving row of any type names them.
+Creation counts as the first access, so nothing is eligible before the window has
+passed since it was cached.
+
+There is no route and no button. The policy is configuration and the only trigger is
+the clock:
+
+| Key | Ships as |
+|---|---|
+| `qits.mirror.eviction.enabled` | `true` |
+| `qits.mirror.eviction.dry-run` | `false` — plan and report, delete nothing |
+| `qits.mirror.eviction.cron` | `0 20 3 * * ?` |
+| `qits.mirror.eviction.window.npm-proxy` | `P30D` |
+| `qits.mirror.eviction.window.maven-proxy` | `P90D` |
+| `qits.mirror.eviction.window.oci-mirror` | `P30D` |
+
+maven's window is longer because a library is resolved when something builds
+*against* it, and that cadence is not a month. A type with no window here does not
+fall back to a number: it fails its own line in the run, because guessing a window is
+guessing what may be deleted.
+
+What each type counts as an identity, and how it goes:
+
+- **npm** — a cached version (`<package>@<version>`) and a cached packument
+  (`<package> (packument)`). A packument's age is `max(fetched_at, the newest access
+  among that package's versions)`, so the document of a package something is still
+  installing is never evicted out from under it. Eviction writes **no tombstone**:
+  the version is upstream's, and re-fetching it is the point.
+- **maven** — a cached file, by path, and a cached `maven-metadata.xml`
+  (`<path> (metadata)`), whose age folds in the files under its directory. The unit
+  is a file rather than a coordinate: a cache repairs itself on the next request, so
+  there is no half-version to prevent.
+- **OCI** — a cached tag, and a manifest no tag names. Both, because upstream drift
+  leaves both behind: a tag moves, and the manifest it used to name becomes a row
+  nobody can reach. A child of a still-tagged index may age out on its own; its bytes
+  survive as long as the index needs them, because the index's closure still names
+  them.
+
+Two mechanisms sit under all three. **The grace window** (`qits.artifacts.gc.blob-grace-period`,
+seven days) gates identity rows and not only blob unlinks: deleting a row while its
+blob file is inside the window would leave the file row-less, and row-less is
+untouchable by construction, so such an identity is withheld whole and re-planned
+next run. **The blob sweep** is the one thing that frees disk, and it carries no
+policy: a blob dies only when no type reaches it any more, checked again against a
+census taken after the row deletions and once more inside the store's write lock.
+
+Every run leaves one log line with the counts per type and for the blob loop.
+
 ## Build
 
     ./mvnw -B -o clean verify -Dquarkus.http.test-port=0
@@ -66,5 +119,5 @@ entry — splitting the client configuration (npm scoped registries, dockerd
 
 ## Not here yet
 
-Eviction GC, the admin JSON API and the explorer UI. Phase 2 follow-ups; see
+The admin JSON API and the explorer UI. Phase 2 follow-ups; see
 `byte-plane-split-plan.md` in the superproject.

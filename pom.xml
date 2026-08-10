@@ -123,6 +123,13 @@
             <artifactId>quarkus-smallrye-health</artifactId>
         </dependency>
         <dependency>
+            <!-- The cache eviction sweep's clock, and this service's only scheduled work. Nothing
+                 else triggers eviction: the policy is a window in configuration, not a decision
+                 somebody takes per run. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-scheduler</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-arc</artifactId>
         </dependency>
