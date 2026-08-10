@@ -1,10 +1,13 @@
 package eu.wohlben.qits.mirror;
 
+import org.hibernate.boot.model.FunctionContributions;
 import org.hibernate.boot.model.TypeContributions;
 import org.hibernate.dialect.DatabaseVersion;
 import org.hibernate.dialect.PostgreSQLDialect;
 import org.hibernate.engine.jdbc.dialect.spi.DialectResolutionInfo;
 import org.hibernate.service.ServiceRegistry;
+import org.hibernate.type.BasicType;
+import org.hibernate.type.StandardBasicTypes;
 import org.hibernate.type.descriptor.jdbc.ClobJdbcType;
 
 /**
@@ -62,5 +65,37 @@ public class MaterializedClobPostgreSQLDialect extends PostgreSQLDialect {
     // Last contribution for a JDBC type code wins, so this replaces whatever the superclass
     // registered for CLOB.
     typeContributions.contributeJdbcType(ClobJdbcType.MATERIALIZED);
+  }
+
+  /**
+   * {@code length(x)} counts characters of a {@code text} column, rather than of a large object.
+   *
+   * <p>The binding above is only half the story. {@code PostgreSQLDialect} also registers a
+   * <b>second</b> rendering of {@code length()} for a CLOB-typed argument — {@code
+   * length(lo_get(?1), pg_client_encoding())} — and the choice is made from the attribute's mapped
+   * type, not from its JDBC binding. So the three {@code @Lob String} documents keep taking that
+   * branch, and the eviction queries that ask how many characters a cache holds die with
+   *
+   * <pre>ERROR: function lo_get(text) does not exist</pre>
+   *
+   * <p>because the column is a {@code text} and there is no large object to fetch. Re-registering
+   * the plain pattern after the superclass has run puts every {@code length()} in this service on
+   * the one form its columns actually support. It is the same argument the type contribution above
+   * makes, at the other end of the same mismatch: qits-artifacts still runs H2, where both
+   * renderings work, so the fix belongs to this deployment's dialect rather than to the shared
+   * entities.
+   */
+  @Override
+  public void initializeFunctionRegistry(FunctionContributions functionContributions) {
+    super.initializeFunctionRegistry(functionContributions);
+    BasicType<Integer> integer =
+        functionContributions
+            .getTypeConfiguration()
+            .getBasicTypeRegistry()
+            .resolve(StandardBasicTypes.INTEGER);
+    functionContributions.getFunctionRegistry().registerPattern("length", "length(?1)", integer);
+    functionContributions
+        .getFunctionRegistry()
+        .registerPattern("character_length", "length(?1)", integer);
   }
 }
