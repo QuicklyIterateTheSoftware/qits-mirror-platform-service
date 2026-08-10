@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- qits-platform-mirror — the platform's pull-through caches, and nothing else
+         (byte-plane-split-plan.md phase 2).
+
+         It owns THREE repository types: NPM_PROXY (a cache of npmjs), MAVEN_PROXY (a cache of Maven
+         Central) and OCI_MIRROR (a pull-through of Docker Hub, quay and the Red Hat registry).
+         Hosted publishing is not its job and cannot be: the hosted profiles that ride in on the
+         qits-registries jars are vetoed at build time (quarkus.arc.exclude-types in
+         application.properties), so the set of registered types and the set of keys
+         ck_artifact_repository_type allows are the same three.
+
+         ONE MODULE. The reference this is modelled on (qits-platform-artifacts) is four modules
+         because its libraries are its own; here the libraries are two separate repositories
+         (qits-blobstore, qits-registries) and what is left is an application — configuration, a
+         schema and a seeder. A parent pom over one child would be ceremony.
+
+         Resolves from Maven Central plus ~/.m2 only. There is deliberately no <repositories> block
+         and no qits-auth-core: nothing publishes to this service, so it needs no machine-token
+         enforcement, and a cache that authenticated its readers would be a cache nothing could
+         read. Pulls are anonymous on qits-net, exactly as they are today. -->
+    <groupId>eu.wohlben.qits</groupId>
+    <artifactId>qits-platform-mirror</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>quarkus</packaging>
+    <name>qits-platform-mirror</name>
+
+    <properties>
+        <qits.blobstore.version>1.0.0-SNAPSHOT</qits.blobstore.version>
+        <qits.registries.version>1.0.0-SNAPSHOT</qits.registries.version>
+        <maven.compiler.release>25</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
+        <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
+        <quarkus.platform.version>3.34.6</quarkus.platform.version>
+
+        <compiler-plugin.version>3.15.0</compiler-plugin.version>
+        <surefire-plugin.version>3.5.4</surefire-plugin.version>
+        <jandex-plugin.version>3.4.0</jandex-plugin.version>
+        <lombok.version>1.18.38</lombok.version>
+        <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
+        <mapstruct.version>1.6.3</mapstruct.version>
+
+        <!-- Real PostgreSQL binaries, resolved as ordinary Maven artifacts and spawned as a child
+             process by the suite. The platform's own convention (qits-events): a clone must test
+             green with no docker, and the schema still has to be exercised against the database it
+             ships on. -->
+        <zonky.embedded-postgres.version>2.2.2</zonky.embedded-postgres.version>
+        <zonky.postgres-binaries.version>18.4.0</zonky.postgres-binaries.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>${quarkus.platform.artifact-id}</artifactId>
+                <version>${quarkus.platform.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.zonky.test.postgres</groupId>
+                <artifactId>embedded-postgres-binaries-bom</artifactId>
+                <version>${zonky.postgres-binaries.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.zonky.test</groupId>
+                <artifactId>embedded-postgres</artifactId>
+                <version>${zonky.embedded-postgres.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+                <version>${lombok.version}</version>
+                <scope>provided</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.mapstruct</groupId>
+                <artifactId>mapstruct</artifactId>
+                <version>${mapstruct.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <!-- The content-addressed blob store: the repository/record entities, the disk index and
+                 the open type registration every profile plugs into. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-blobstore</artifactId>
+            <version>${qits.blobstore.version}</version>
+        </dependency>
+        <dependency>
+            <!-- The npm wire and store — both halves, hosted and cache. Only NPM_PROXY is wired
+                 here; NpmPackagesProfile is excluded from discovery so no row can carry its key. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-registries-npm</artifactId>
+            <version>${qits.registries.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-registries-maven</artifactId>
+            <version>${qits.registries.version}</version>
+        </dependency>
+        <dependency>
+            <!-- The /v2 Distribution routes, the mirror upstream table and the miss path. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-registries-oci</artifactId>
+            <version>${qits.registries.version}</version>
+        </dependency>
+        <dependency>
+            <!-- /mirror/q/health/ready — the readiness endpoint qits-cd's health gate curls. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-smallrye-health</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-arc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-hibernate-orm-panache</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jdbc-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <!-- Flyway 10 split its database support out of core; without this the postgres
+                 lineage has no dialect and migrate-at-start fails at the first statement. -->
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <!-- OTLP export to qits-observability, on the same settings every other service ships.
+                 Dark outside a deployment (see application.properties). -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-opentelemetry</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test</groupId>
+            <artifactId>embedded-postgres</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- Named per architecture on purpose: the binaries are separate artifacts and zonky
+                 picks one at run time, so an unnamed arch fails in the middle of a suite rather
+                 than during resolution. -->
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-linux-amd64</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-linux-arm64v8</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.zonky.test.postgres</groupId>
+            <artifactId>embedded-postgres-binaries-darwin-arm64v8</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <!-- This module is the DEPLOYABLE, and `<packaging>quarkus</packaging>` above is
+                     what says so: it binds generate-code, generate-code-tests and build into the
+                     lifecycle, so augmentation is not an execution someone can misplace. -->
+                <groupId>${quarkus.platform.group-id}</groupId>
+                <artifactId>quarkus-maven-plugin</artifactId>
+                <version>${quarkus.platform.version}</version>
+                <extensions>true</extensions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${compiler-plugin.version}</version>
+                <configuration>
+                    <parameters>true</parameters>
+                    <useIncrementalCompilation>false</useIncrementalCompilation>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.mapstruct</groupId>
+                            <artifactId>mapstruct-processor</artifactId>
+                            <version>${mapstruct.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok-mapstruct-binding</artifactId>
+                            <version>${lombok-mapstruct-binding.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+            <plugin>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${surefire-plugin.version}</version>
+                <configuration>
+                    <systemPropertyVariables>
+                        <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>io.smallrye</groupId>
+                <artifactId>jandex-maven-plugin</artifactId>
+                <version>${jandex-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>make-index</id>
+                        <goals>
+                            <goal>jandex</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
