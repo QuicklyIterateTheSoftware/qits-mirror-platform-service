@@ -1,0 +1,48 @@
+# How qits-deployments deploys this repo. It reads this file from the git host at the built sha, so
+# the answer travels with the commit.
+#
+# CARRYING THE FILE AT ALL is the other thing it says. qits-workspaces reads it on a release to
+# decide whether this repository deploys — a library or an SPA carries none and its release is the
+# trunk push alone.
+#
+# PLATFORM service, and the only byte service that stays one. Everything here is a cache of somebody
+# else's bytes: npmjs, Maven Central, Docker Hub. A copy per environment would be several caches
+# fetching the same tarball from the same upstream and each holding its own disk copy of it, which is
+# the opposite of what a pull-through cache is for. One instance, warmed by every environment's
+# builds, is the whole reason this service was split out of qits-artifacts
+# (byte-plane-split-plan.md).
+deployment_target: platform
+
+# A postgres role and database of this application's own, created on the tier's postgres BEFORE the
+# successor container starts and injected as QITS_RESOURCE_DB_URL / _USERNAME / _PASSWORD.
+#
+# The database name is not spelled because the default is right: it derives from the application name
+# with the `qits-` prefix dropped and dashes turned to underscores, so this asks for
+# `qits_platform_mirror`, and a name written out here would be a second copy of one answer.
+#
+# application.properties maps those three variables onto quarkus.datasource.mirror.* with no defaults
+# behind them. Without this line the container has no database and dies at Flyway's migrate-at-start
+# naming the missing variable — which is the failure worth having: a cache that invented an empty
+# store would answer every lookup as a miss, refetch the internet on every build, and report nothing.
+resources: postgresql:db
+
+# THE PROBE THE DEPLOY GATES ON, SPELLED OUT BECAUSE THE DERIVED DEFAULT IS WRONG. The default would
+# be /platform-mirror/q/health/ready — the repository name minus `qits-`; this application serves its
+# non-application root at /mirror/q (quarkus.http.non-application-root-path), which is the
+# application's own name minus the prefix. A derived default is only ever right where the route
+# prefix and the served prefix are the same string.
+#
+# Readiness rather than liveness, and the difference is not cosmetic: quarkus-agroal registers a
+# readiness check for the `mirror` datasource as soon as a health extension is present, so this path
+# is red while the database asked for above is unreachable. Liveness answers UP with an empty check
+# list — a process that boots and cannot read its cache index would pass it, and that container is
+# the one this deploy must not promote.
+health_path: /mirror/q/health/ready
+
+# WHAT THIS FILE CANNOT SAY, so that nobody looks for it here. This service is reached by clients
+# that qits-gateway does not front — dockerd resolves no qits-net name, and `/v2` is already the
+# gateway's qits-artifacts entry — so its deployment publishes a host port (127.0.0.1:8082:8080) and
+# mounts a blobs volume. Neither is expressible in this grammar: the parser knows six scalar keys
+# (deployment_target, available_on_env, deploy_branches, health_path, health_cmd, resources) and
+# nothing about ports, volumes or environment. Those are run-args, and they live on the deployer's
+# config volume, written by the bootstrap CLI. An unknown key here fails the deployment.

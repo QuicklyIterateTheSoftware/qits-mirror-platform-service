@@ -99,9 +99,35 @@ its default for every upstream key is a closed port so a test that has not opted
 into a stub cannot reach the internet by accident.
 
 Needs `eu.wohlben.qits:qits-blobstore` and `qits-registries-{common,npm,maven,oci}`
-installed locally (`./mvnw install` in each sibling repository).
+installed locally (`./mvnw install` in each sibling repository) or released to the
+platform's Maven repository, which the `qits-maven` repository in `pom.xml` names.
+
+This module compiles to a GraalVM native image, which is what a deployment runs:
+
+```
+sdk env && ./mvnw -B verify -Dnative
+```
+
+`.sdkmanrc` names `25.0.2-graalce`, so this needs no container. `-Dnative` is a
+profile trigger and nothing else — without the `native` profile in `pom.xml` it
+would build a jar and report success — and without a GraalVM on the path Quarkus
+falls back to a 1.8 GB Mandrel image over docker, green either way. Recognise the
+fallback by the image pull.
 
 ## Deployment
+
+**How it ships.** A push builds `docker/Dockerfile` — a Mandrel builder stage that native-compiles
+this module, a `ubi-minimal` runtime stage that carries only the binary — and pushes it as
+`qits/qits-platform-mirror:<sha>`; a release rebuilds the same content under the released version
+(`.config/qits/ci-post-receive.yml` and `.config/qits/ci-event-release.yml`). Both builds run
+`--network qits-net` with `--build-arg QITS_MAVEN_REPOSITORY_URL=…`, because `qits-blobstore` and
+the three `qits-registries` jars exist only in the platform's own Maven repository and a docker
+build reaches no other address for them. `.config/qits/deployments.yml` is the deploy answer:
+**a platform service** (one cache warmed by every environment, not a copy per tier) with
+`resources: postgresql:db` and the health gate at `/mirror/q/health/ready`. Everything that grammar
+cannot say — the loopback host port `127.0.0.1:8082:8080` its non-qits-net clients need, and the
+volume the blobs live on — is a run-arg, written by the bootstrap CLI. Every registry address the
+build reads is `qits-artifacts`', never this deployment's: a mirror must not build through itself.
 
 The database arrives through the platform's generic resource contract —
 `QITS_RESOURCE_DB_URL` / `_USERNAME` / `_PASSWORD`. None of them has a default:

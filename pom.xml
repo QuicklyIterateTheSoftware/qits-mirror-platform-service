@@ -19,8 +19,7 @@
          (qits-blobstore, qits-registries) and what is left is an application — configuration, a
          schema and a seeder. A parent pom over one child would be ceremony.
 
-         Resolves from Maven Central plus ~/.m2 only. There is deliberately no <repositories> block
-         and no qits-auth-core: nothing publishes to this service, so it needs no machine-token
+         No qits-auth-core: nothing publishes to this service, so it needs no machine-token
          enforcement, and a cache that authenticated its readers would be a cache nothing could
          read. Pulls are anonymous on qits-net, exactly as they are today. -->
     <groupId>eu.wohlben.qits</groupId>
@@ -32,6 +31,11 @@
     <properties>
         <qits.blobstore.version>1.0.0-SNAPSHOT</qits.blobstore.version>
         <qits.registries.version>1.0.0-SNAPSHOT</qits.registries.version>
+        <!-- Where the two library repositories' jars come from when they are not in ~/.m2 — which
+             is every build that is not a developer's. The image build overrides it with the address
+             the platform's Maven repository answers on qits-net; see docker/Dockerfile. -->
+        <qits.maven.repository.url>http://localhost:8081/artifacts/maven/maven</qits.maven.repository.url>
+
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
@@ -90,6 +94,18 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <repositories>
+        <!-- The platform's own Maven repository, where qits-blobstore and the three qits-registries
+             jars are published. The id is what a locally cached copy is recorded under, so it has to
+             stay `qits-maven` or an offline build refuses an artifact it already has — and it is the
+             id .qits-maven-settings.xml mirrors, which is how the image build gets an address at
+             all. -->
+        <repository>
+            <id>qits-maven</id>
+            <url>${qits.maven.repository.url}</url>
+        </repository>
+    </repositories>
 
     <dependencies>
         <dependency>
@@ -253,4 +269,27 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- GraalVM native build: `-Dnative` disables the fast-jar and enables the native image.
+             `-Dnative` is a PROFILE TRIGGER and nothing else — the property Quarkus reads is
+             quarkus.native.enabled, so without this block `./mvnw verify -Dnative` builds a jar,
+             reports BUILD SUCCESS and ships no binary at all.
+
+             There is no `skipITs` line here, unlike the siblings': this repository has no failsafe
+             plugin and no *IT, so flipping it would be config for a plugin that is not bound. Add
+             both together or neither. -->
+        <profile>
+            <id>native</id>
+            <activation>
+                <property>
+                    <name>native</name>
+                </property>
+            </activation>
+            <properties>
+                <quarkus.package.jar.enabled>false</quarkus.package.jar.enabled>
+                <quarkus.native.enabled>true</quarkus.native.enabled>
+            </properties>
+        </profile>
+    </profiles>
 </project>
