@@ -5,7 +5,8 @@ The platform's pull-through caches, and nothing else.
 One deployable Quarkus application over two library repositories — `qits-blobstore`
 (the content-addressed store) and `qits-registries` (the npm, maven and OCI wire
 protocols). This repository holds what a library cannot: configuration, a schema,
-and a seeder.
+a seeder, and the explorer — a read-only admin API at `/mirror/api` with the
+Angular client that draws it at `/mirror/`.
 
 ## What it owns
 
@@ -24,6 +25,32 @@ profiles arrive on the classpath whether this service wants them or not —
 the registered types and the keys `ck_artifact_repository_type` allows are the
 same three, and a request to create anything else is a 400 that names what does
 exist.
+
+## The explorer
+
+What a cache holds is decided by what somebody pulled, and what it drops is decided by
+a window and a clock. So the surface that shows it is **read-only, whole**: two GETs,
+no create, no delete, and no "evict now" button — a page that could delete a cached tag
+would be a second eviction policy with no record of why it ran.
+
+| Path | Answers |
+|---|---|
+| `GET /mirror/api/repositories` | `{"repositories":[{name, type, upstream, createdAt}]}` — every cache root and what it fronts |
+| `GET /mirror/api/upstreams` | `{"upstreams":[{host, namespace, cachedImages, createdAt}]}` — every mirrored registry |
+| `/mirror/` | the Angular client (`src/main/webui`, the `qits-platform-spa-mirror` submodule), built and served by Quinoa |
+
+`name` and `type` on a repository and `host` on an upstream are the fields the client
+is **promised**; it draws everything else as a dynamic column typed by what the value
+turns out to be. So a field added on this side appears in the UI with no client
+release — and a field that would be a guess must not be added at all, because a
+plausible wrong number in a table is worse than a missing one.
+
+**A failed read is a 5xx, never an empty answer.** This is the service where the cost
+of the opposite is highest: a wrong "there is no such thing" is cached by every docker,
+npm and maven client that asked. Nothing in `MirrorExplorer` or the two resources
+catches a database error, so an unreadable store reaches the caller as a 500; `DbRetry`
+wraps both reads, which is what covers a connection that dies mid-flight after the pool
+has already handed it over. `MirrorApiTest` asserts both halves.
 
 ## Schema
 
@@ -90,7 +117,18 @@ Every run leaves one log line with the counts per type and for the blob loop.
 
 ## Build
 
+    git submodule update --init src/main/webui
+    (cd src/main/webui && npm ci)
     ./mvnw -B -o clean verify -Dquarkus.http.test-port=0
+
+**The clone-alone rule now has two lines in front of it.** An uninitialised gitlink is
+an empty directory, and that is the one case Quinoa treats as a misconfiguration rather
+than "no client": the build stops at `No package.json found in Web UI directory`.
+`./mvnw test` still needs neither node nor the submodule — Quinoa is disabled by
+default in test mode — but `verify` runs `package` on its way to failsafe, so it, like
+`package`, needs both. Quinoa shells out to the **host's** node, which is why the
+client stays on Angular 21: the platform's node is 22.22.0 and Angular CLI 22 wants
+22.22.3.
 
 The suite runs against a real PostgreSQL — zonky binaries spawned as a child
 process, never a container — so the baseline is exercised against the database it
@@ -104,13 +142,15 @@ platform's Maven repository, which the `qits-maven` repository in `pom.xml` name
 `qits-db-core` and `qits-arch-rules` come from that repository too, at released
 versions — the datasource resilience baseline and the test that enforces it.
 
-`qits-db-core` is here for `PatientPgDriver` alone, which is configuration and not
-code: nothing in this repository names `DbRetry`, and that is a statement about
-where the writes are rather than an omission. A pull writes through
-`qits-registries`, so the seam a cutover can reach is in those libraries. What is
-written here is the boot seeder (a failed boot is a restart) and the eviction sweep
-(a background chore that logs and retries on the next schedule). Neither has a
-caller waiting on it, so neither is worth holding a thread for.
+`qits-db-core` carries both halves of the platform's datasource resilience, and this
+repository now uses both. `PatientPgDriver` is configuration rather than code — the
+datasource block names it as a string — and covers a connection that was dead before a
+request began. `DbRetry` covers one that dies mid-flight, and it has exactly one call
+site here: the explorer's two reads, which a caller is waiting on. Nothing else needs
+it. A pull writes through `qits-registries`, so a write seam a cutover can reach is in
+those libraries; what is written here is the boot seeder (a failed boot is a restart)
+and the eviction sweep (a background chore that logs and retries on the next schedule),
+and neither has anyone waiting.
 
 This module compiles to a GraalVM native image, which is what a deployment runs:
 
@@ -130,9 +170,17 @@ fallback by the image pull.
 this module, a `ubi-minimal` runtime stage that carries only the binary — and pushes it as
 `qits/qits-platform-mirror:<sha>`; a release rebuilds the same content under the released version
 (`.config/qits/ci-post-receive.yml` and `.config/qits/ci-event-release.yml`). Both builds run
-`--network qits-net` with `--build-arg QITS_MAVEN_REPOSITORY_URL=…`, because `qits-blobstore` and
+`--network host` with `--build-arg QITS_MAVEN_REPOSITORY_URL=…`, because `qits-blobstore` and
 the three `qits-registries` jars exist only in the platform's own Maven repository and a docker
-build reaches no other address for them. `.config/qits/deployments.yml` is the deploy answer:
+build reaches no other address for them — host networking rather than a custom one because buildkit
+refuses custom networks.
+
+**Both pipelines build the client before the image.** The step container sits on `qits-net`, where
+the platform's npm registry answers; a docker `RUN` reaches that registry by no address at all, so
+the Dockerfile neuters Quinoa's install/ci/build commands to `--version` and stages the bundle it was
+handed. A missing bundle is a red build at a `test -f` guard, before the native compile — not a green
+one shipping a service that answers `/mirror/` with a 404. `.config/qits/deployments.yml` is the
+deploy answer:
 **a platform service** (one cache warmed by every environment, not a copy per tier) with
 `resources: postgresql:db` and the health gate at `/mirror/q/health/ready`. Everything that grammar
 cannot say — the loopback host port `127.0.0.1:8082:8080` its non-qits-net clients need, and the
@@ -155,5 +203,17 @@ entry — splitting the client configuration (npm scoped registries, dockerd
 
 ## Not here yet
 
-The admin JSON API and the explorer UI. Phase 2 follow-ups; see
-`byte-plane-split-plan.md` in the superproject.
+Nothing this repository has deferred. The admin API and the explorer UI were the
+open phase-2 work package in `byte-plane-split-plan.md`; both are above.
+
+What is still ahead is not this service's to do alone: the **cutover**, which splits
+the client configuration (npm scoped registries, dockerd `registry-mirrors`, the maven
+repositories list) so third-party traffic arrives here rather than at `qits-artifacts`.
+
+The packaged-surface probe list is **done, on the fast-jar, 2026-08-11** — Quinoa is off
+in tests, so nothing else could have proved it. `/mirror/` answers 200 HTML with
+`<base href="/mirror/">`, a deep link falls back to `index.html`, `/mirror/api/nope` is
+a 404 rather than a page, `/mirror/q/health/ready` is 200, and a mistyped `/v2`,
+`/artifacts/npm` or `/artifacts/maven` path answers its own router's 404. Bare `/mirror`
+is a 404, the known Quinoa wart every client shares. **Not** proved: the native binary
+and the image build, which ride the next deploy.

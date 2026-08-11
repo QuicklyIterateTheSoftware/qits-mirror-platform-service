@@ -10,7 +10,8 @@
 # - The build below is ci-post-receive.yml's, and the two must stay matched: one image content, two
 #   coordinates. That includes --network and --build-arg, which this repository needs because
 #   qits-blobstore and the three qits-registries jars live only in the platform's own Maven
-#   repository.
+#   repository — and the webui half, which builds the explorer client before the image because a
+#   docker RUN can reach the @qits npm scope by no address. That file carries the long form.
 # - This file is inert until an SCMRelease for this repository exists, and it lands first on purpose
 #   — the bus is at-most-once, so the trigger must precede the event it selects.
 #
@@ -49,6 +50,32 @@ steps:
       git fetch "$QITS_CI_REPOSITORY_URL" "refs/tags/$version:refs/tags/$version"
       git checkout --detach "$version"
 
+      # --- half one: the bundle -----------------------------------------------------------------
+      # The clone is shallow and does not recurse, so qits-platform-spa-mirror arrives as an empty
+      # directory and Quinoa fails the image build on it. The `checkout --detach` above is what makes
+      # this land on the gitlink the RELEASE recorded rather than on main's. See ci-post-receive.yml
+      # for why the lockfile origins are rewritten, why the order of the two sed expressions matters,
+      # and why the registry is passed as environment rather than as a file.
+      frontend_url="${QITS_CI_REPOSITORY_URL%/*}/qits-platform-spa-mirror"
+      git -c submodule.qits-platform-spa-mirror.url="$frontend_url" submodule update --init src/main/webui
+
+      cd src/main/webui
+      npm_hosted_origin=$(node -p 'new URL(process.env.QITS_NPM_REGISTRY_URL).origin')
+      npm_proxy_origin=$(node -p 'new URL(process.env.QITS_NPM_PROXY_URL).origin')
+      npm_hosted_path=$(node -p 'new URL(process.env.QITS_NPM_REGISTRY_URL).pathname')
+      sed -i -E \
+        -e "s#(\"resolved\": \")https?://[^/\"]+#\1$npm_proxy_origin#" \
+        -e "s#(\"resolved\": \")https?://[^/\"]+($npm_hosted_path)#\1$npm_hosted_origin\2#" \
+        package-lock.json
+
+      env npm_config_registry="$QITS_NPM_PROXY_URL" \
+          "npm_config_@qits:registry=$QITS_NPM_REGISTRY_URL" \
+          npm ci --no-audit --no-fund
+
+      npm run build
+      cd -
+
+      # --- half two: the image ------------------------------------------------------------------
       ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-platform-mirror:$version"
       docker build --network host \
         --build-arg QITS_MAVEN_REPOSITORY_URL="http://$QITS_REGISTRY/artifacts/maven/maven" \

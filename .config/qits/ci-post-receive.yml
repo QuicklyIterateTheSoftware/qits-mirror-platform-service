@@ -1,11 +1,17 @@
 # The pipeline qits-ci runs on every push to a tracked branch of this repository.
 #
-# ONE STEP, and that is the whole shape — qits-platform-dns' pipeline, name for name: this service
-# serves no page yet (the admin UI is byte-plane-split-plan.md phase 2), so there is nothing to
-# install from the platform's npm registry and nothing to prepare in the build context. The
-# Dockerfile's builder stage does everything.
+# ONE STEP, TWO HALVES, and the split between them is the whole point — qits-artifacts' pipeline,
+# name for name:
 #
-# THE TWO FLAGS THAT dns DOES NOT NEED. This repository is one application over two library
+#   1. build the explorer client (src/main/webui = the qits-platform-spa-mirror submodule) HERE, in
+#      the step container, which sits on qits-net and can therefore reach the platform's own npm
+#      registry — where @qits/ui-components lives and where nothing else can reach it from;
+#   2. build docker/Dockerfile, whose builder stage packages that already-built bundle and never
+#      runs an install.
+#
+# The step image is node-docker-base rather than ci-base because half one needs node, npm and git.
+#
+# THE TWO FLAGS THAT A CLIENT-LESS SIBLING STILL WOULD NEED. This repository is one application over two library
 # repositories — qits-blobstore and qits-registries-{common,npm,maven,oci} — published to the
 # platform's own Maven repository and available from nowhere else, so the builder stage has to be
 # able to reach it:
@@ -36,11 +42,70 @@
 # `docker rmi || true` answers 0, and the run reports SUCCESS. The deployer is then told an image
 # exists that does not. -u makes an unset registry variable stop the step too.
 steps:
-  - image: qits/build-images/ci-base:latest
+  - image: qits/build-images/node-docker-base:latest
     docker: true
     timeout-seconds: 3600
     script: |
       set -eu
+
+      # --- half one: the bundle -----------------------------------------------------------------
+      # The daemon's clone is shallow and does not recurse, so the qits-platform-spa-mirror submodule
+      # at src/main/webui arrives as an EMPTY DIRECTORY — and Quinoa fails the image build on exactly
+      # that (`No package.json found in Web UI directory`). `submodule update --init` checks out the
+      # gitlink this repository recorded, so the bundle is built from the client commit this commit
+      # names. Initialising it here rather than asking the daemon to clone differently keeps the
+      # submodule this repo's business: a public GitHub repo needing no credentials, one fetch.
+      #
+      # The url is derived from this run's own repository url rather than read from .gitmodules,
+      # because the sibling lives beside this repository on whichever host CI cloned from.
+      frontend_url="${QITS_CI_REPOSITORY_URL%/*}/qits-platform-spa-mirror"
+      git -c submodule.qits-platform-spa-mirror.url="$frontend_url" submodule update --init src/main/webui
+
+      cd src/main/webui
+      # THE LOCKFILE is the one file this step edits, and npm leaves no alternative. npm pins a full
+      # resolved URL per package and qits-platform-spa-mirror's lockfile is generated on the
+      # deployment host, so every entry names a localhost port that does not exist in this container.
+      # `npm ci` fetches tarballs by those URLs and never asks the configured registry, so the
+      # environment below does not reach them: without this swap the install dies on connection
+      # refused. The paths are identical on every address, so replacing the ORIGIN and keeping the
+      # path is all it takes, and the integrity hashes are what make that safe. The checkout is this
+      # step's own; nothing is edited that anyone will read again.
+      #
+      # THE BYTE PLANE IS TWO SERVICES, WHICH IS WHY THE SWAP READS THE PATH. This service holds the
+      # npmjs pull-through cache; qits-artifacts hosts the @qits scope. No single origin serves both,
+      # so the path tells them apart: an entry under the hosted registry's own pathname
+      # ($QITS_NPM_REGISTRY_URL's) is a @qits tarball and gets the hosted origin, everything else gets
+      # the proxy's. THE ORDER OF THE TWO EXPRESSIONS IS THE TRICK — sed applies -e in sequence per
+      # line, so the broad proxy swap runs FIRST and the narrow path-anchored one corrects the @qits
+      # entries after it. The other order lets the broad expression undo the narrow one.
+      #
+      # npm's own knob for this, `--replace-registry-host=always`, cannot do it against a registry
+      # mounted under a path: @npmcli/arborist glues rather than resolves, so the pathname ends up
+      # doubled and every tarball 404s. Measured on npm 10.9.4.
+      npm_hosted_origin=$(node -p 'new URL(process.env.QITS_NPM_REGISTRY_URL).origin')
+      npm_proxy_origin=$(node -p 'new URL(process.env.QITS_NPM_PROXY_URL).origin')
+      npm_hosted_path=$(node -p 'new URL(process.env.QITS_NPM_REGISTRY_URL).pathname')
+      sed -i -E \
+        -e "s#(\"resolved\": \")https?://[^/\"]+#\1$npm_proxy_origin#" \
+        -e "s#(\"resolved\": \")https?://[^/\"]+($npm_hosted_path)#\1$npm_hosted_origin\2#" \
+        package-lock.json
+
+      # ENVIRONMENT, not a file. qits-platform-spa-mirror COMMITS an .npmrc (localhost:8082 for npmjs
+      # and localhost:8081 for @qits, right for a developer on the host), and npm ranks a project
+      # .npmrc ABOVE ~/.npmrc — so a `cat > ~/.npmrc` preamble would be written and silently ignored.
+      # npm_config_* environment outranks both files, so it wins without touching the submodule tree.
+      env npm_config_registry="$QITS_NPM_PROXY_URL" \
+          "npm_config_@qits:registry=$QITS_NPM_REGISTRY_URL" \
+          npm ci --no-audit --no-fund
+
+      # dist/qits-platform-spa-mirror/browser — the bundle the image build consumes (it is
+      # quarkus.quinoa.build-dir in src/main/resources/application.properties) and the ONE artifact
+      # this half exists to produce. Lint and test are qits-platform-spa-mirror's own pipeline's job;
+      # repeating them here would only make this repo red for someone else's commit.
+      npm run build
+      cd -
+
+      # --- half two: the image ------------------------------------------------------------------
       ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-platform-mirror:$QITS_CI_SHA"
       docker build --network host \
         --build-arg QITS_MAVEN_REPOSITORY_URL="http://$QITS_REGISTRY/artifacts/maven/maven" \

@@ -17,11 +17,13 @@
          ONE MODULE. The reference this is modelled on (qits-platform-artifacts) is four modules
          because its libraries are its own; here the libraries are two separate repositories
          (qits-blobstore, qits-registries) and what is left is an application — configuration, a
-         schema and a seeder. A parent pom over one child would be ceremony.
+         schema, a seeder, and now the explorer surface: a read-only admin API at /mirror/api and the
+         Angular client Quinoa serves at /mirror/. A parent pom over one child would be ceremony.
 
          No qits-auth-core: nothing publishes to this service, so it needs no machine-token
          enforcement, and a cache that authenticated its readers would be a cache nothing could
-         read. Pulls are anonymous on qits-net, exactly as they are today. -->
+         read. Pulls are anonymous on qits-net, exactly as they are today — and the admin API adds
+         nothing to defend, because it has no write. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-platform-mirror</artifactId>
     <version>1.0.0-SNAPSHOT</version>
@@ -50,6 +52,14 @@
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.34.6</quarkus.platform.version>
+
+        <!-- Quinoa is a Quarkiverse extension: not in quarkus-bom, and its version does NOT track the
+             platform's. 2.8.2 is built against Quarkus 3.27.3 LTS — older than the 3.34.6 above,
+             which is the direction that works, since an extension compiled against an older core
+             runs on a newer one. 2.8.3 is built against 3.36.2 and would be an extension asking this
+             core for API it may not have. Bump it only past a platform bump. Same pin as
+             qits-artifacts and every other SPA-serving service. -->
+        <quinoa.version>2.8.2</quinoa.version>
 
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
@@ -99,6 +109,11 @@
                 <artifactId>mapstruct</artifactId>
                 <version>${mapstruct.version}</version>
             </dependency>
+            <dependency>
+                <groupId>io.quarkiverse.quinoa</groupId>
+                <artifactId>quarkus-quinoa</artifactId>
+                <version>${quinoa.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -141,6 +156,32 @@
             <version>${qits.registries.version}</version>
         </dependency>
         <dependency>
+            <!-- The admin API at /mirror/api — two read-only listings the explorer draws. It is the
+                 only JAX-RS surface here; every byte this service serves is still a raw Vert.x route
+                 in a library jar. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest</artifactId>
+        </dependency>
+        <dependency>
+            <!-- The listings are records, so something has to write them as JSON. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-rest-jackson</artifactId>
+        </dependency>
+        <dependency>
+            <!-- The explorer SPA. Quinoa runs the npm build in src/main/webui (the
+                 qits-platform-spa-mirror submodule) during augmentation and serves the result as
+                 static resources — see the quarkus.quinoa.* block in application.properties.
+
+                 IT IS WHY quarkus-undertow MUST STAY OUT. Quinoa's production static serving goes
+                 through Quarkus' own static-resource route, which undertow's servlet stack takes
+                 over and then cannot find — a packaged process that serves the API and answers the
+                 SPA with a 404. Nothing here needs a servlet: the three wire protocols are raw
+                 Vert.x routes and the admin API is quarkus-rest. Check `dependency:tree` before
+                 adding anything that sounds like a web framework. -->
+            <groupId>io.quarkiverse.quinoa</groupId>
+            <artifactId>quarkus-quinoa</artifactId>
+        </dependency>
+        <dependency>
             <!-- /mirror/q/health/ready — the readiness endpoint qits-cd's health gate curls. -->
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-smallrye-health</artifactId>
@@ -165,16 +206,21 @@
             <artifactId>quarkus-jdbc-postgresql</artifactId>
         </dependency>
         <dependency>
-            <!-- PatientPgDriver, the driver the mirror datasource opens its connections through.
-                 Runtime scope: no source file here imports it, config names it as a string. It
-                 delegates to org.postgresql.Driver and keeps asking for up to 14s while postgres is
-                 coming back — which is what stops a cutover from teaching every docker and maven
-                 client that an artifact is absent. See the datasource block in
-                 application.properties. -->
+            <!-- Two things, and the scope changed when the second arrived.
+
+                 PatientPgDriver is the driver the mirror datasource opens its connections through;
+                 config names it as a string, so it alone would need only runtime scope. It delegates
+                 to org.postgresql.Driver and keeps asking for up to 14s while postgres is coming
+                 back — which is what stops a cutover from teaching every docker and maven client
+                 that an artifact is absent. See the datasource block in application.properties.
+
+                 DbRetry is the other half, for a connection that dies MID-FLIGHT, after statements
+                 ran — which the pool cannot help with. The admin API's two listings are reads a
+                 caller is waiting on, so they are exactly its documented call site, and naming it in
+                 source is what makes this a compile dependency. -->
             <groupId>${project.groupId}</groupId>
             <artifactId>qits-db-core</artifactId>
             <version>${qits.db-core.version}</version>
-            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
