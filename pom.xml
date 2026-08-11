@@ -31,6 +31,13 @@
     <properties>
         <qits.blobstore.version>1.0.0-SNAPSHOT</qits.blobstore.version>
         <qits.registries.version>1.0.0-SNAPSHOT</qits.registries.version>
+        <!-- The platform's datasource resilience baseline: qits-db-core carries PatientPgDriver,
+             which the datasource block in application.properties names, and qits-arch-rules carries
+             the test that fails this build when a postgresql datasource is missing a line of that
+             block. Published by libs/qits-integrations-quarkus, so they come from the same
+             repository as the two above. -->
+        <qits.db-core.version>2026.811.152803</qits.db-core.version>
+        <qits.arch-rules.version>2026.811.152803</qits.arch-rules.version>
         <!-- Where the two library repositories' jars come from when they are not in ~/.m2 — which
              is every build that is not a developer's. The image build overrides it with the address
              the platform's Maven repository answers on qits-net; see docker/Dockerfile. -->
@@ -158,6 +165,18 @@
             <artifactId>quarkus-jdbc-postgresql</artifactId>
         </dependency>
         <dependency>
+            <!-- PatientPgDriver, the driver the mirror datasource opens its connections through.
+                 Runtime scope: no source file here imports it, config names it as a string. It
+                 delegates to org.postgresql.Driver and keeps asking for up to 14s while postgres is
+                 coming back — which is what stops a cutover from teaching every docker and maven
+                 client that an artifact is absent. See the datasource block in
+                 application.properties. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-db-core</artifactId>
+            <version>${qits.db-core.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-flyway</artifactId>
         </dependency>
@@ -182,6 +201,14 @@
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- The platform's shared rules, here for DatasourceBaselineRules. Test scope: they run
+                 in the build and ship in nothing. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-arch-rules</artifactId>
+            <version>${qits.arch-rules.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>

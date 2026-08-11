@@ -101,6 +101,8 @@ into a stub cannot reach the internet by accident.
 Needs `eu.wohlben.qits:qits-blobstore` and `qits-registries-{common,npm,maven,oci}`
 installed locally (`./mvnw install` in each sibling repository) or released to the
 platform's Maven repository, which the `qits-maven` repository in `pom.xml` names.
+`qits-db-core` and `qits-arch-rules` come from that repository too, at released
+versions — the datasource resilience baseline and the test that enforces it.
 
 This module compiles to a GraalVM native image, which is what a deployment runs:
 
