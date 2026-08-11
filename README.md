@@ -104,6 +104,14 @@ platform's Maven repository, which the `qits-maven` repository in `pom.xml` name
 `qits-db-core` and `qits-arch-rules` come from that repository too, at released
 versions — the datasource resilience baseline and the test that enforces it.
 
+`qits-db-core` is here for `PatientPgDriver` alone, which is configuration and not
+code: nothing in this repository names `DbRetry`, and that is a statement about
+where the writes are rather than an omission. A pull writes through
+`qits-registries`, so the seam a cutover can reach is in those libraries. What is
+written here is the boot seeder (a failed boot is a restart) and the eviction sweep
+(a background chore that logs and retries on the next schedule). Neither has a
+caller waiting on it, so neither is worth holding a thread for.
+
 This module compiles to a GraalVM native image, which is what a deployment runs:
 
 ```
