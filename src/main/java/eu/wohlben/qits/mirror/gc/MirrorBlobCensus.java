@@ -19,7 +19,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Which blobs the store's rows still reach, per repository type, beside what is on disk.
+ * Which blobs the store's rows still reach, per repository type, beside what the store holds.
  *
  * <p>The type split is what makes per-type eviction safe. A blob dedupes globally, so "is this blob
  * garbage" is never a question one type can answer — but "which blobs does <em>my</em> type still
@@ -31,8 +31,8 @@ import java.util.Set;
  *   <li>{@code OCI_MIRROR} — the manifest closure ({@link OciManifestFootprints}, which walks an
  *       index's children, so a child manifest of a live index is live). Sizes are the {@code size}
  *       fields inside the manifest documents.
- *   <li>{@code NPM_PROXY} — {@code npm_version.tarball_blob_id}, sized from disk because there is no
- *       size column.
+ *   <li>{@code NPM_PROXY} — {@code npm_version.tarball_blob_id}, sized from the store because there
+ *       is no size column.
  *   <li>{@code MAVEN_PROXY} — {@code maven_artifact.blob_id}, sized from the row: that table is the
  *       one protocol table whose size was free at stage time.
  * </ul>
@@ -46,7 +46,7 @@ import java.util.Set;
  * row's own type key and files that repository's blobs under it. A table a repository has no rows in
  * simply contributes nothing.
  *
- * <p><b>What this census cannot see is not garbage — it is untouchable.</b> A blob file no row names
+ * <p><b>What this census cannot see is not garbage — it is untouchable.</b> A blob no row names
  * appears in {@link Census#rowless()}, and no plan may ever release one: a blob can only become
  * sweepable by <em>losing</em> its last row, so a blob that never had one is out of reach of the
  * whole mechanism by construction.
@@ -63,13 +63,14 @@ public class MirrorBlobCensus {
   @Inject BlobDiskIndex diskIndex;
 
   /**
-   * One reading of the store: every blob file, and every blob each type still reaches.
+   * One reading of the store: every stored blob, and every blob each type still reaches.
    *
    * <p>A value object, so a caller can hold it across a plan without the store shifting under it —
-   * which is also why a sweep re-takes it immediately before unlinking anything.
+   * which is also why a sweep re-takes it immediately before removing anything.
    *
    * @param takenAt when the reading was taken
-   * @param onDisk blob id (bare hex) to bytes on disk, for every file under the blob root
+   * @param onDisk blob id (bare hex) to stored bytes, for every promoted blob. The NAME outlived the
+   *     disk: the bytes are {@code blob_chunk} rows now, and the census contract is unchanged by it
    * @param liveByType stored type key ({@code OCI_MIRROR}) to blob id to the size that type knows
    *     for it
    */
@@ -95,7 +96,7 @@ public class MirrorBlobCensus {
       return referenced;
     }
 
-    /** Blob files no row of any type names — the untouchable pool. */
+    /** Blobs no row of any type names — the untouchable pool. */
     public Set<String> rowless() {
       Set<String> referenced = referenced();
       Set<String> rowless = new HashSet<>();
@@ -103,7 +104,7 @@ public class MirrorBlobCensus {
       return rowless;
     }
 
-    /** What unlinking these blobs would actually free. A blob with no file frees nothing. */
+    /** What removing these blobs would free. A blob the store does not hold frees nothing. */
     public long bytesOnDisk(Collection<String> blobIds) {
       long total = 0;
       for (String blobId : blobIds) {
@@ -113,7 +114,7 @@ public class MirrorBlobCensus {
     }
   }
 
-  /** Takes a fresh reading: one disk walk (cached and write-invalidated) and one pass over the rows. */
+  /** Takes a fresh reading: one indexed query over the blob table and one pass over the rows. */
   public Census take() {
     Map<String, Long> onDisk = diskIndex.sizes();
     Map<String, Map<String, Long>> live = new HashMap<>();

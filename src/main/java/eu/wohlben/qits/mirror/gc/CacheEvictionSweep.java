@@ -246,7 +246,7 @@ public class CacheEvictionSweep {
   }
 
   /**
-   * The grace window as an evictor asks it: is this blob's file younger than the store allows.
+   * The grace window as an evictor asks it: is this blob younger than the store allows.
    *
    * <p>Read once per run against one instant, so every identity of every type is judged on the same
    * clock the unlink will use.

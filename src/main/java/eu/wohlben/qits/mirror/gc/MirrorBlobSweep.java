@@ -14,7 +14,7 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * The one mechanism that frees disk, and it carries no policy at all.
+ * The one mechanism that frees storage, and it carries no policy at all.
  *
  * <p>Evictors kill identities and free nothing. This reconciles what they did: a blob dies only when
  * <b>no type</b> reaches it any more, because the store dedupes globally across types and
@@ -34,9 +34,9 @@ public class MirrorBlobSweep {
   /**
    * What a run would free.
    *
-   * @param blobCount how many blob files would be unlinked
+   * @param blobCount how many blobs would be removed
    * @param reclaimableBytes what they occupy
-   * @param withheldByGraceWindow blobs held back because their file is younger than the window
+   * @param withheldByGraceWindow blobs held back because they are younger than the window
    * @param withheldBytes what those occupy
    * @param blobIds the candidates themselves, in a stable order
    */
@@ -55,12 +55,12 @@ public class MirrorBlobSweep {
   /**
    * What a run actually did.
    *
-   * @param unlinked files removed
+   * @param unlinked blobs removed
    * @param reclaimedBytes what they occupied
-   * @param withheldByGraceWindow candidates whose file was younger than the window
+   * @param withheldByGraceWindow candidates younger than the window
    * @param withheldBytes what those occupy
    * @param stillReferenced candidates something referenced again between planning and unlinking
-   * @param alreadyGone candidates whose file was not there any more
+   * @param alreadyGone candidates that were not there any more
    */
   public record SweepOutcome(
       int unlinked,
@@ -147,7 +147,7 @@ public class MirrorBlobSweep {
    * safety order inside:
    *
    * <ol>
-   *   <li><b>Candidates are structural</b>: released by some plan, retained by none, on disk, and
+   *   <li><b>Candidates are structural</b>: released by some plan, retained by none, stored, and
    *       rowed in the planning census.
    *   <li><b>Grace-withheld candidates never reach the unlink.</b> Their identities were withheld
    *       too (rows intact — the evictor's gate), so they are counted once, as withheld.
@@ -205,7 +205,7 @@ public class MirrorBlobSweep {
         unlinked, reclaimed, withheld, withheldBytes, stillReferenced, alreadyGone);
   }
 
-  /** How long a blob's file must sit untouched before the store will unlink it. */
+  /** How long a blob must sit untouched before the store will remove it. */
   public Duration graceWindow() {
     return blobs.graceWindow();
   }
