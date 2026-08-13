@@ -42,7 +42,15 @@ health_path: /mirror/q/health/ready
 # WHAT THIS FILE CANNOT SAY, so that nobody looks for it here. This service is reached by clients
 # that qits-gateway does not front — dockerd resolves no qits-net name, and `/v2` is already the
 # gateway's qits-artifacts entry — so its deployment publishes a host port (127.0.0.1:8082:8080) and
-# mounts a blobs volume. Neither is expressible in this grammar: the parser knows six scalar keys
-# (deployment_target, available_on_env, deploy_branches, health_path, health_cmd, resources) and
-# nothing about ports, volumes or environment. Those are run-args, and they live on the deployer's
+# mounts a blobs volume. Neither is expressible in this grammar: the parser knows seven scalar keys
+# (deployment_target, available_on_env, deploy_branches, health_path, health_cmd, resources,
+# update_order) and nothing about ports, volumes or environment. Those are run-args, and they live on the deployer's
 # config volume, written by the bootstrap CLI. An unknown key here fails the deployment.
+
+# STOP-FIRST, because this deployment publishes a host port. Under start-first the successor
+# waits in Pending for a port the predecessor only frees by stopping — which start-first never
+# does — so a one-node swarm deadlocks on the first rolling update. A single binder cannot have
+# the lossless-rollback overlap; the deploy takes the brief gap instead. Measured live on
+# qits-platform-mirror's 2026.813.163303 deploy, the first host-port update since the swarm
+# cutover (2026-08-13).
+update_order: stop-first
