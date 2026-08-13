@@ -50,24 +50,15 @@
 # `resources: postgresql:db`; qits-deployments creates the role and the database `qits_platform_mirror`
 # on the tier's postgres before the successor container starts and injects all three variables.
 #
-# One more path has no safe default, and it is the one that holds the bytes:
+# THAT DATABASE IS THE WHOLE OF THIS CONTAINER'S STATE. Cached tarballs, jars and layers are chunk
+# rows beside the identity rows that name them (V2__blob_tables.sql, and
+# qits.artifacts.blobs-datasource=mirror), so there is NO blobs directory and NO volume to mount. A
+# restart loses only whatever fetch was in flight; the cache re-warms itself on the next miss,
+# because re-fetching from upstream is what a pull-through cache does.
 #
-#   QITS_ARTIFACTS_BLOBS_DIR   Where cached tarballs, jars and layers live on disk. Every one of them
-#                              is indexed by a row in the database above — blobs whose index did not
-#                              survive are not data, they are orphans — so the two travel together.
-#                              The shipped default is ${user.home}/.qits/data/mirror/blobs, which
-#                              inside this image resolves to nothing usable: UID 1001 has no
-#                              /etc/passwd entry in ubi-minimal and a native image reads user.home
-#                              through getpwuid, so setting HOME does not fix it.
-#
-# So a deployment mounts a volume at /data (which this image owns, see the runtime stage) and names
-# both:
-#
-#   docker run -v qits-platform-mirror-data:/data \
-#     -p 127.0.0.1:8082:8080 \
+#   docker run -p 127.0.0.1:8082:8080 \
 #     -e QITS_RESOURCE_DB_URL=jdbc:postgresql://some-postgres:5432/qits_platform_mirror \
 #     -e QITS_RESOURCE_DB_USERNAME=... -e QITS_RESOURCE_DB_PASSWORD=... \
-#     -e QITS_ARTIFACTS_BLOBS_DIR=/data/mirror/blobs \
 #     qits/platform-mirror:latest
 #
 # THE PUBLISHED HOST PORT IS NOT OPTIONAL FOR THIS SERVICE, unlike its siblings. Its clients are not
@@ -169,7 +160,7 @@ RUN d=src/main/webui/dist/qits-platform-spa-mirror/browser; \
 FROM localhost:8082/redhat/ubi9/ubi-minimal:9.6
 WORKDIR /work
 
-# Nothing is installed here. This service fetches over HTTP, hashes bytes and writes files; it shells
+# Nothing is installed here. This service fetches over HTTP, hashes bytes and writes rows; it shells
 # out to nothing at all. A package added here is a package on a host serving anonymous reads.
 #
 # `quarkus.package.output-name` names the binary `qits-platform-mirror` (no -runner suffix), so the
@@ -178,16 +169,12 @@ WORKDIR /work
 COPY --from=build --chown=1001:root /src/target/qits-platform-mirror /work/qits-platform-mirror
 RUN chmod +x /work/qits-platform-mirror
 
-# The mount point for the blobs, created here so it is OWNED. Docker seeds a fresh named volume from
-# whatever the image has at the mount path, ownership included; with no such directory it makes one
-# root-owned 0755 and the first cache write dies on an AccessDeniedException instead of anything that
-# names the cause. Group-writable and group-root because a ubi image is meant to survive being
-# assigned an arbitrary UID with GID 0. (A bind mount still takes its ownership from the host —
-# nothing in an image can fix that.)
-RUN mkdir -p /data && chown -R 1001:root /data && chmod -R 775 /data
-
-# Nothing is named here: no QUARKUS_DATASOURCE_* and no QITS_ARTIFACTS_BLOBS_DIR. Both belong to the
-# deployment's storage, and this image refuses to start until a deployment says where they go.
+# NO /data AND NO VOLUME. This image used to own a mount point for the blob files; blob bytes are
+# PostgreSQL rows now, so the container writes nothing it needs to keep and there is nothing to
+# mount. A deployment that still mounts the old volume is carrying dead bytes.
+#
+# Nothing is named here either: no QUARKUS_DATASOURCE_*. The database belongs to the deployment, and
+# this image refuses to start until a deployment says where it is.
 
 # One port for all of it — /artifacts/npm/**, /artifacts/maven/**, /v2/**, /mirror/api/**,
 # /mirror/q/** and the SPA at /mirror/ are six route stacks in one process, not six listeners.

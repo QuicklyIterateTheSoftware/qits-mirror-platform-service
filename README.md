@@ -62,6 +62,17 @@ OCI mirror namespaces with the upstream each fronts. The two npm/maven cache roo
 come from `MirrorRepositorySeeder` at boot instead: a migration prefills static
 platform knowledge, and a seeded repository name is not that.
 
+`V2__blob_tables.sql` adds the blob store's three tables — `blob`, `blob_content`
+and `blob_chunk` — on the same database. It is a **verbatim copy** of
+`qits-blobstore`'s `src/main/resources/db/blobstore-tables.sql`, because a library
+owns no schema and ships no Flyway migrations: the canonical text lives there and
+each consumer copies it into its own lineage, which keeps a later drift readable as
+a diff. `qits.artifacts.blobs-datasource=mirror` is what points the store at them.
+
+**Blob bytes are rows now, and the service is stateless.** There is no blob
+directory and no volume: a tarball and the row that names it commit or fail
+together, so neither can outlive the other. A restart loses only fetches in flight.
+
 ## Eviction
 
 What keeps a cache from growing forever. Every byte here came from upstream and can
@@ -106,12 +117,13 @@ What each type counts as an identity, and how it goes:
   them.
 
 Two mechanisms sit under all three. **The grace window** (`qits.artifacts.gc.blob-grace-period`,
-seven days) gates identity rows and not only blob unlinks: deleting a row while its
-blob file is inside the window would leave the file row-less, and row-less is
-untouchable by construction, so such an identity is withheld whole and re-planned
-next run. **The blob sweep** is the one thing that frees disk, and it carries no
-policy: a blob dies only when no type reaches it any more, checked again against a
-census taken after the row deletions and once more inside the store's write lock.
+seven days, read off `blob.stored_at`) gates identity rows and not only blob
+deletions: deleting a row while its blob is inside the window would leave the blob
+row-less, and row-less is untouchable by construction, so such an identity is
+withheld whole and re-planned next run. **The blob sweep** is the one thing that
+frees storage, and it carries no policy: a blob dies only when no type reaches it
+any more, checked again against a census taken after the row deletions and once
+more inside the store's per-blob advisory lock.
 
 Every run leaves one log line with the counts per type and for the blob loop.
 
@@ -139,6 +151,8 @@ into a stub cannot reach the internet by accident.
 Needs `eu.wohlben.qits:qits-blobstore` and `qits-registries-{common,npm,maven,oci}`
 installed locally (`./mvnw install` in each sibling repository) or released to the
 platform's Maven repository, which the `qits-maven` repository in `pom.xml` names.
+Both are pinned to `1.0.0-pgblobs-SNAPSHOT` while the PostgreSQL blob store is on
+its branch, so a build here needs those branches installed until they release.
 `qits-db-core` and `qits-arch-rules` come from that repository too, at released
 versions — the datasource resilience baseline and the test that enforces it.
 
@@ -182,10 +196,12 @@ handed. A missing bundle is a red build at a `test -f` guard, before the native 
 one shipping a service that answers `/mirror/` with a 404. `.config/qits/deployments.yml` is the
 deploy answer:
 **a platform service** (one cache warmed by every environment, not a copy per tier) with
-`resources: postgresql:db` and the health gate at `/mirror/q/health/ready`. Everything that grammar
-cannot say — the loopback host port `127.0.0.1:8082:8080` its non-qits-net clients need, and the
-volume the blobs live on — is a run-arg, written by the bootstrap CLI. Every registry address the
-build reads is `qits-artifacts`', never this deployment's: a mirror must not build through itself.
+`resources: postgresql:db` and the health gate at `/mirror/q/health/ready`. The one thing that
+grammar cannot say — the loopback host port `127.0.0.1:8082:8080` its non-qits-net clients need — is
+a run-arg, written by the bootstrap CLI. **There is no blobs volume any more**: the container is
+stateless except for its database, so a deployment still mounting one is carrying dead bytes. Every
+registry address the build reads is `qits-artifacts`', never this deployment's: a mirror must not
+build through itself.
 
 The database arrives through the platform's generic resource contract —
 `QITS_RESOURCE_DB_URL` / `_USERNAME` / `_PASSWORD`. None of them has a default:
