@@ -1,7 +1,6 @@
 package eu.wohlben.qits.mirror.gc;
 
 import eu.wohlben.qits.artifacts.control.ArtifactRepositoryService;
-import eu.wohlben.qits.artifacts.control.BlobDiskIndex;
 import eu.wohlben.qits.artifacts.control.BlobStore;
 import eu.wohlben.qits.artifacts.control.MavenProxyProfile;
 import eu.wohlben.qits.artifacts.control.NpmProxyProfile;
@@ -24,22 +23,23 @@ import eu.wohlben.qits.artifacts.persistence.NpmVersionTombstoneRepository;
 import eu.wohlben.qits.artifacts.persistence.OciManifestRepository;
 import eu.wohlben.qits.artifacts.persistence.OciMirrorTagCheckRepository;
 import eu.wohlben.qits.artifacts.persistence.OciTagRepository;
+import io.agroal.api.AgroalDataSource;
+import io.quarkus.agroal.DataSource;
 import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.inject.Inject;
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.FileTime;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.BeforeEach;
 
 /**
@@ -51,8 +51,8 @@ import org.junit.jupiter.api.BeforeEach;
  * cache root with no cached rows in it contributes nothing to any plan, so leaving them costs these
  * cases nothing.
  *
- * <p>Blob files are backdated past the store's grace window by the seeders, because the window is
- * read off a file's mtime and a test's blobs are always seconds old. Backdating is the honest way
+ * <p>Blobs are backdated past the store's grace window by the seeders, because the window is read
+ * off {@code blob.stored_at} and a test's blobs are always seconds old. Backdating is the honest way
  * round: it exercises the same clock comparison a real run makes rather than configuring the window
  * away. A case that means to test the window says so by backdating less, or not at all.
  */
@@ -65,8 +65,17 @@ abstract class EvictionFixture {
 
   @Inject ArtifactRepositoryService repositoryService;
   @Inject BlobStore blobStore;
-  @Inject BlobDiskIndex diskIndex;
   @Inject MirrorBlobCensus census;
+
+  /**
+   * The blob tables, reached directly. They are not mapped entities — the store writes them with
+   * plain JDBC — so a wipe and a backdate are SQL here as they are in the library's own suite. It is
+   * the same datasource the rows above are on, which is what {@code
+   * qits.artifacts.blobs-datasource=mirror} says.
+   */
+  @Inject
+  @DataSource("mirror")
+  AgroalDataSource blobs;
 
   @Inject ArtifactRecordRepository records;
   @Inject OciManifestRepository ociManifests;
@@ -79,12 +88,9 @@ abstract class EvictionFixture {
   @Inject MavenArtifactRepository mavenArtifacts;
   @Inject MavenProxyMetadataRepository mavenProxyMetadata;
 
-  @ConfigProperty(name = "qits.artifacts.blobs-dir")
-  String blobsDir;
-
-  /** Wipes every cached row and every blob file before each case, so each one starts empty. */
+  /** Wipes every cached row and every stored blob before each case, so each one starts empty. */
   @BeforeEach
-  void reset() throws IOException {
+  void reset() {
     QuarkusTransaction.requiringNew()
         .run(
             () -> {
@@ -99,15 +105,10 @@ abstract class EvictionFixture {
               mavenProxyMetadata.deleteAll();
               records.deleteAll();
             });
-    Path dir = Path.of(blobsDir);
-    if (Files.exists(dir)) {
-      try (var walk = Files.walk(dir)) {
-        walk.sorted(Comparator.reverseOrder()).forEach(EvictionFixture::deleteQuietly);
-      }
-    }
-    // The disk index is invalidated by every write the service makes — but this wipes the directory
-    // from outside it, which is exactly the out-of-band change its age ceiling exists for.
-    diskIndex.invalidate();
+    // blob first, then blob_content: the identity row is what points at the content, and removing
+    // the content cascades to every chunk. Neither table has a key into the rows above.
+    execute("delete from blob");
+    execute("delete from blob_content");
   }
 
   // === npm ======================================================================================
@@ -128,7 +129,7 @@ abstract class EvictionFixture {
    * {@code fetched_at} alone would evict the document of a package something is actively installing,
    * and the next install would pay upstream for it again.
    */
-  NpmCache seedNpmCache() throws IOException {
+  NpmCache seedNpmCache() {
     repositoryService.ensure(NPM_CACHE, NpmProxyProfile.KEY);
     String cold = store(filled(NPM_COLD_TARBALL, (byte) 11));
     String warm = store(filled(NPM_WARM_TARBALL, (byte) 12));
@@ -205,7 +206,7 @@ abstract class EvictionFixture {
    * #MAVEN_ARTIFACT_DIR}, which is the document's directory, and that prefix relationship is what
    * the evictor folds.
    */
-  MavenCache seedMavenCache() throws IOException {
+  MavenCache seedMavenCache() {
     repositoryService.ensure(MAVEN_CACHE, MavenProxyProfile.KEY);
     String cold = store(filled(MAVEN_COLD, (byte) 13));
     String warm = store(filled(MAVEN_WARM, (byte) 14));
@@ -274,7 +275,7 @@ abstract class EvictionFixture {
    * state of a partially-pulled image, not a corruption, and every reader that walks manifests has
    * to survive it.
    */
-  MirrorStore seedMirror() throws IOException {
+  MirrorStore seedMirror() {
     repositoryService.ensure(MIRROR_REPO, OciMirrorProfile.KEY);
 
     String config = store(filled(MIRROR_CONFIG, (byte) 6));
@@ -380,10 +381,38 @@ abstract class EvictionFixture {
     return staged.sha256();
   }
 
-  /** Ages a blob file past the store's grace window. */
-  void backdate(String blobId, Duration age) throws IOException {
-    Path path = Path.of(blobsDir, blobId.substring(0, 2), blobId);
-    Files.setLastModifiedTime(path, FileTime.from(Instant.now().minus(age)));
+  /** Ages a stored blob past the store's grace window. */
+  void backdate(String blobId, Duration age) {
+    update(
+        "update blob set stored_at = ? where id = ?",
+        statement -> {
+          statement.setObject(1, Instant.now().minus(age).atOffset(ZoneOffset.UTC));
+          statement.setString(2, blobId);
+        });
+  }
+
+  private void execute(String sql) {
+    try (Connection connection = blobs.getConnection();
+        Statement statement = connection.createStatement()) {
+      statement.execute(sql);
+    } catch (SQLException e) {
+      throw new IllegalStateException(sql, e);
+    }
+  }
+
+  /** Fills in a prepared statement's parameters, the way JDBC makes you. */
+  private interface Binding {
+    void bind(PreparedStatement statement) throws SQLException;
+  }
+
+  private void update(String sql, Binding binding) {
+    try (Connection connection = blobs.getConnection();
+        PreparedStatement statement = connection.prepareStatement(sql)) {
+      binding.bind(statement);
+      statement.executeUpdate();
+    } catch (SQLException e) {
+      throw new IllegalStateException(sql, e);
+    }
   }
 
   static byte[] filled(int length, byte value) {
@@ -440,13 +469,5 @@ abstract class EvictionFixture {
   /** The identities of a judged list, sorted, which is what every case here compares. */
   static List<String> identities(List<JudgedIdentity> identities) {
     return identities.stream().map(JudgedIdentity::identity).sorted().toList();
-  }
-
-  private static void deleteQuietly(Path path) {
-    try {
-      Files.deleteIfExists(path);
-    } catch (IOException ignored) {
-      // best effort
-    }
   }
 }
