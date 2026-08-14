@@ -26,16 +26,16 @@
          nothing to defend, because it has no write. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-platform-mirror</artifactId>
-    <version>2026.813.163303</version>
+    <version>2026.814.72248</version>
     <packaging>quarkus</packaging>
     <name>qits-platform-mirror</name>
 
     <properties>
         <!-- The PG-only blob store. Both libraries moved their bytes out of the filesystem and into
-             three PostgreSQL tables, so this pair is pinned to the branch snapshot until the
-             campaign releases. -->
-        <qits.blobstore.version>1.0.0-pgblobs-SNAPSHOT</qits.blobstore.version>
-        <qits.registries.version>1.0.0-pgblobs-SNAPSHOT</qits.registries.version>
+             three PostgreSQL tables. The campaign has released, so both are pinned at their
+             calver. -->
+        <qits.blobstore.version>2026.814.71936</qits.blobstore.version>
+        <qits.registries.version>2026.814.72113</qits.registries.version>
         <!-- The platform's datasource resilience baseline: qits-db-core carries PatientPgDriver,
              which the datasource block in application.properties names, and qits-arch-rules carries
              the test that fails this build when a postgresql datasource is missing a line of that
@@ -46,7 +46,7 @@
         <!-- Where the two library repositories' jars come from when they are not in ~/.m2 — which
              is every build that is not a developer's. The image build overrides it with the address
              the platform's Maven repository answers on qits-net; see docker/Dockerfile. -->
-        <qits.maven.repository.url>http://localhost:8081/artifacts/maven/maven</qits.maven.repository.url>
+        <qits.maven.repository.url>http://registry.dev.localhost:8080/artifacts/maven/maven</qits.maven.repository.url>
 
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
