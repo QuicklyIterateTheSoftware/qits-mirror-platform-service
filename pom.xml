@@ -32,10 +32,10 @@
 
     <properties>
         <!-- The PG-only blob store. Both libraries moved their bytes out of the filesystem and into
-             three PostgreSQL tables, so this pair is pinned to the branch snapshot until the
-             campaign releases. -->
-        <qits.blobstore.version>1.0.0-pgblobs-SNAPSHOT</qits.blobstore.version>
-        <qits.registries.version>1.0.0-pgblobs-SNAPSHOT</qits.registries.version>
+             three PostgreSQL tables. The campaign has released, so both are pinned at their
+             calver. -->
+        <qits.blobstore.version>2026.814.71936</qits.blobstore.version>
+        <qits.registries.version>2026.814.72113</qits.registries.version>
         <!-- The platform's datasource resilience baseline: qits-db-core carries PatientPgDriver,
              which the datasource block in application.properties names, and qits-arch-rules carries
              the test that fails this build when a postgresql datasource is missing a line of that
