@@ -12,8 +12,14 @@ import eu.wohlben.qits.db.DbRetry;
 import io.quarkus.panache.common.Sort;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
+import io.quarkus.hibernate.orm.PersistenceUnit;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -49,6 +55,8 @@ public class MirrorExplorer {
   @Inject ArtifactRepositoryRepository repositories;
 
   @Inject OciMirrorUpstreams upstreams;
+
+  @Inject @PersistenceUnit("mirror") EntityManager entityManager;
 
   /**
    * The address the npm cache fronts, and the maven one below it.
@@ -101,6 +109,120 @@ public class MirrorExplorer {
           }
           return rows;
         });
+  }
+
+  /** The protocol-specific rows under a cache root, normalized for one explorer UI. */
+  public List<CachedPackageRow> packages(MirrorRepositoryRow repository) {
+    return DbRetry.call(
+        "list packages cached in " + repository.name(),
+        () ->
+            switch (repository.type()) {
+              case "npm-proxy" -> npmPackages(repository.name());
+              case "maven-proxy" -> mavenPackages(repository.name());
+              case "oci-mirror" -> ociPackages(repository.name());
+              default -> List.of();
+            });
+  }
+
+  private List<CachedPackageRow> npmPackages(String repository) {
+    List<Object[]> rows = entityManager.createNativeQuery("""
+        select v.package_name, v.version, v.created_at, v.accessed_at,
+               coalesce(b.size_bytes, 0),
+               coalesce(string_agg(t.tag, ',' order by t.tag), '')
+          from npm_version v
+          left join blob b on b.id = v.tarball_blob_id
+          left join npm_dist_tag t on t.repository = v.repository
+             and t.package_name = v.package_name and t.version = v.version
+         where v.repository = ?1
+         group by v.package_name, v.version, v.created_at, v.accessed_at, b.size_bytes
+         order by v.package_name, v.version
+        """).setParameter(1, repository).getResultList();
+    return grouped(rows);
+  }
+
+  private List<CachedPackageRow> ociPackages(String repository) {
+    List<Object[]> rows = entityManager.createNativeQuery("""
+        select m.image_name, 'sha256:' || m.digest, m.created_at, m.accessed_at,
+               m.size_bytes, coalesce(string_agg(t.tag, ',' order by t.tag), '')
+          from oci_manifest m
+          left join oci_tag t on t.repository = m.repository and t.image_name = m.image_name
+             and t.manifest_digest = m.digest
+         where m.repository = ?1
+         group by m.image_name, m.digest, m.created_at, m.accessed_at, m.size_bytes
+         order by m.image_name, m.created_at desc
+        """).setParameter(1, repository).getResultList();
+    return grouped(rows);
+  }
+
+  private List<CachedPackageRow> mavenPackages(String repository) {
+    List<Object[]> rows = entityManager.createNativeQuery("""
+        select path, size_bytes, created_at, accessed_at
+          from maven_artifact where repository = ?1 order by path
+        """).setParameter(1, repository).getResultList();
+    Map<String, Map<String, VersionBuilder>> packages = new LinkedHashMap<>();
+    for (Object[] row : rows) {
+      String path = (String) row[0];
+      String[] parts = path.split("/");
+      if (parts.length < 4 || path.endsWith("maven-metadata.xml")) continue;
+      String version = parts[parts.length - 2];
+      String artifact = parts[parts.length - 3];
+      String group = String.join(".", java.util.Arrays.copyOf(parts, parts.length - 3));
+      String name = group + ":" + artifact;
+      VersionBuilder item = packages.computeIfAbsent(name, ignored -> new LinkedHashMap<>())
+          .computeIfAbsent(version, VersionBuilder::new);
+      item.add(parts[parts.length - 1], ((Number) row[1]).longValue(), instant(row[2]), instant(row[3]));
+    }
+    return finish(packages);
+  }
+
+  private List<CachedPackageRow> grouped(List<Object[]> rows) {
+    Map<String, Map<String, VersionBuilder>> packages = new LinkedHashMap<>();
+    for (Object[] row : rows) {
+      VersionBuilder item = packages.computeIfAbsent((String) row[0], ignored -> new LinkedHashMap<>())
+          .computeIfAbsent((String) row[1], VersionBuilder::new);
+      item.addLabels((String) row[5]);
+      item.add(null, ((Number) row[4]).longValue(), instant(row[2]), instant(row[3]));
+    }
+    return finish(packages);
+  }
+
+  private List<CachedPackageRow> finish(Map<String, Map<String, VersionBuilder>> packages) {
+    return packages.entrySet().stream().map(entry -> {
+      List<CachedPackageVersionRow> versions = entry.getValue().values().stream()
+          .map(VersionBuilder::build).toList();
+      long size = versions.stream().mapToLong(CachedPackageVersionRow::sizeBytes).sum();
+      Instant last = versions.stream().map(CachedPackageVersionRow::lastAccessedAt)
+          .filter(java.util.Objects::nonNull).max(Comparator.naturalOrder()).orElse(null);
+      return new CachedPackageRow(entry.getKey(), versions, size, last);
+    }).toList();
+  }
+
+  private static Instant instant(Object value) {
+    if (value == null) return null;
+    if (value instanceof Instant instant) return instant;
+    if (value instanceof java.time.OffsetDateTime offset) return offset.toInstant();
+    if (value instanceof java.sql.Timestamp timestamp) return timestamp.toInstant();
+    throw new IllegalArgumentException("Unsupported database timestamp: " + value.getClass());
+  }
+
+  private static final class VersionBuilder {
+    final String version;
+    final List<String> labels = new ArrayList<>();
+    final List<String> files = new ArrayList<>();
+    long size;
+    Instant cachedAt;
+    Instant accessedAt;
+    VersionBuilder(String version) { this.version = version; }
+    void addLabels(String csv) { if (csv != null && !csv.isBlank()) labels.addAll(List.of(csv.split(","))); }
+    void add(String file, long bytes, Instant cached, Instant accessed) {
+      if (file != null) files.add(file);
+      size += bytes;
+      if (cachedAt == null || cached.isBefore(cachedAt)) cachedAt = cached;
+      if (accessed != null && (accessedAt == null || accessed.isAfter(accessedAt))) accessedAt = accessed;
+    }
+    CachedPackageVersionRow build() {
+      return new CachedPackageVersionRow(version, labels, files, size, cachedAt, accessedAt);
+    }
   }
 
   /**
