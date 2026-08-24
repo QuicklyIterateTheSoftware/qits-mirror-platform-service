@@ -28,8 +28,8 @@ import org.junit.jupiter.api.Test;
  * Here the same mistake would be an explorer page reporting a mirror that caches nothing, and — far
  * worse if the habit spread to the wire routes — a "no such artifact" every client caches.
  *
- * <p>Quinoa is disabled in tests, so nothing here says anything about {@code /mirror/}. What the SPA
- * is served as is provable only against the packaged artifact.
+ * <p>Quinoa is disabled in tests, so nothing here says anything about the client at {@code /}. What
+ * the SPA is served as is provable only against the packaged artifact.
  */
 @QuarkusTest
 class MirrorApiTest {

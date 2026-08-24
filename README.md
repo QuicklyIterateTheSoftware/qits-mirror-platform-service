@@ -6,7 +6,10 @@ One deployable Quarkus application over two library repositories — `qits-blobs
 (the content-addressed store) and `qits-registries` (the npm, maven and OCI wire
 protocols). This repository holds what a library cannot: configuration, a schema,
 a seeder, and the explorer — a read-only admin API at `/mirror/api` with the
-Angular client that draws it at `/mirror/`.
+Angular client that draws it, served at `/` on this service's own host,
+`mirror.<env>.<domain>`. That is the same authority dockerd, npm and maven already
+dial: the edge picks the gate per request, so the browser plane and the machine
+plane share one name.
 
 ## What it owns
 
@@ -37,7 +40,7 @@ would be a second eviction policy with no record of why it ran.
 |---|---|
 | `GET /mirror/api/repositories` | `{"repositories":[{name, type, upstream, createdAt}]}` — every cache root and what it fronts |
 | `GET /mirror/api/upstreams` | `{"upstreams":[{host, namespace, cachedImages, createdAt}]}` — every mirrored registry |
-| `/mirror/` | the Angular client (`src/main/webui`, the `qits-platform-spa-mirror` submodule), built and served by Quinoa |
+| `/` on `mirror.<env>.<domain>` | the Angular client (`src/main/webui`, the `qits-platform-spa-mirror` submodule), built and served by Quinoa |
 
 `name` and `type` on a repository and `host` on an upstream are the fields the client
 is **promised**; it draws everything else as a dynamic column typed by what the value
@@ -193,7 +196,7 @@ refuses custom networks.
 the platform's npm registry answers; a docker `RUN` reaches that registry by no address at all, so
 the Dockerfile neuters Quinoa's install/ci/build commands to `--version` and stages the bundle it was
 handed. A missing bundle is a red build at a `test -f` guard, before the native compile — not a green
-one shipping a service that answers `/mirror/` with a 404. `.config/qits/deployments.yml` is the
+one shipping a service that answers `/` with a 404. `.config/qits/deployments.yml` is the
 deploy answer:
 **a platform service** (one cache warmed by every environment, not a copy per tier) with
 `resources: postgresql:db` and the health gate at `/mirror/q/health/ready`. The one thing that
@@ -213,9 +216,15 @@ Readiness is at `/mirror/q/health/ready`.
 **The protocol routes do not follow that segment, and cannot.** Their prefixes are
 literals in the `qits-registries` jars, so this service answers npm and maven on
 the same `/artifacts/*` paths `qits-artifacts` does, and OCI at the host root like
-every registry. Two services cannot both be `/artifacts/*` behind one gateway
-entry — splitting the client configuration (npm scoped registries, dockerd
-`registry-mirrors`, the maven repositories list) is the cutover phase's job.
+every registry. The per-service host is what settles that collision: those paths are
+reached on `mirror.<env>.<domain>`, so no gateway entry has to choose between two
+services for `/artifacts/*`. Splitting the client configuration (npm scoped registries,
+dockerd `registry-mirrors`, the maven repositories list) is still the cutover phase's job.
+
+Because the client now sits at `/`, those three roots are inside the SPA fallback's
+reach for the first time, and `quarkus.quinoa.ignored-path-prefixes` lists them
+absolutely — `/mirror,/artifacts,/v2` — so a mistyped machine path is a 404 rather
+than a page.
 
 ## Not here yet
 
@@ -226,10 +235,12 @@ What is still ahead is not this service's to do alone: the **cutover**, which sp
 the client configuration (npm scoped registries, dockerd `registry-mirrors`, the maven
 repositories list) so third-party traffic arrives here rather than at `qits-artifacts`.
 
-The packaged-surface probe list is **done, on the fast-jar, 2026-08-11** — Quinoa is off
-in tests, so nothing else could have proved it. `/mirror/` answers 200 HTML with
-`<base href="/mirror/">`, a deep link falls back to `index.html`, `/mirror/api/nope` is
-a 404 rather than a page, `/mirror/q/health/ready` is 200, and a mistyped `/v2`,
-`/artifacts/npm` or `/artifacts/maven` path answers its own router's 404. Bare `/mirror`
-is a 404, the known Quinoa wart every client shares. **Not** proved: the native binary
-and the image build, which ride the next deploy.
+The packaged-surface probe list needs a **rerun after the root-path flip**, and this
+repository carries no failsafe IT to do it — the list is run by hand on the fast-jar.
+It was green on 2026-08-11 against the old `/mirror/` mount; what it must now show is
+`/` answering 200 HTML with `<base href="/">`, a deep link falling back to
+`index.html`, `/mirror/api/nope` and `/mirror/q/nope` 404 rather than a page, and a
+mistyped `/v2`, `/artifacts/npm` or `/artifacts/maven` path answering a 404 — those
+three are inside the fallback's reach now and are held back only by the absolute
+`ignored-path-prefixes` list. `/mirror/q/health/ready` is 200. **Not** proved: the
+native binary and the image build, which ride the next deploy.

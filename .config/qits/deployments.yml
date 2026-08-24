@@ -13,8 +13,20 @@
 # (byte-plane-split-plan.md).
 deployment_target: platform
 
+# One route for this application's machine surface: the admin API at /mirror/api and health at
+# /mirror/q. The edge path-routes every application's route prefix on EVERY host, so this one line
+# keeps both reachable wherever a reader is. The client itself is no longer under it — it is served
+# at / on this application's own host. The three cache roots are not here either: they are reached on
+# this application's host directly.
 routes: /mirror
-navigation: Mirror:10
+
+# WHERE THIS APPLICATION HANGS IN THE SIDEBAR. `system` is the global group — this service is about
+# the platform rather than about one project — and 2 is the position inside it.
+#
+# The host is not spelled because the derived one is already right: the application name minus its
+# `qits-platform-` prefix is `mirror`, which is the label dockerd, npm and maven already dial. The
+# browser plane and the machine plane land on the same authority by design, not by accident.
+navigation-entries: system.Mirror:2
 
 # A postgres role and database of this application's own, created on the tier's postgres BEFORE the
 # successor container starts and injected as QITS_RESOURCE_DB_URL / _USERNAME / _PASSWORD.
@@ -42,13 +54,11 @@ resources: postgresql:db
 # the one this deploy must not promote.
 health_path: /mirror/q/health/ready
 
-# WHAT THIS FILE CANNOT SAY, so that nobody looks for it here. This service is reached by clients
-# that qits-gateway does not front — dockerd resolves no qits-net name, and `/v2` is already the
-# gateway's qits-artifacts entry — so its deployment publishes a host port (127.0.0.1:8082:8080) and
-# mounts a blobs volume. The repository declaration now also owns public route metadata
-# (`routes`, `upstream_port`, `navigation`), but it still says nothing about host-port publication,
-# volumes or environment. Those are run-args, and they live on the deployer's config volume, written
-# by the bootstrap CLI. An unknown key here fails the deployment.
+# WHAT THIS FILE CANNOT SAY, so that nobody looks for it here. This service publishes a host port
+# (127.0.0.1:8082:8080) and mounts a blobs volume. The repository declaration owns public route
+# metadata (`routes`, `upstream_port`, `host`, `navigation-entries`), but it still says nothing about
+# host-port publication, volumes or environment. Those are run-args, and they live on the deployer's
+# config volume, written by the bootstrap CLI. An unknown key here fails the deployment.
 
 # STOP-FIRST, because this deployment publishes a host port. Under start-first the successor
 # waits in Pending for a port the predecessor only frees by stopping — which start-first never
