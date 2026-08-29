@@ -158,6 +158,35 @@ Both are pinned to `1.0.0-pgblobs-SNAPSHOT` while the PostgreSQL blob store is o
 its branch, so a build here needs those branches installed until they release.
 `qits-db-core` and `qits-arch-rules` come from that repository too, at released
 versions — the datasource resilience baseline and the test that enforces it.
+`qits-userflows` and `qits-service-mock` join them in **test scope** for the
+userflow below.
+
+### The userflow
+
+`PullThroughBootstrapIT` is this repository's one integration test and its one
+**user story**: the whole service as it is *packaged*, launched beside a recording
+`MockService` standing in for `registry.npmjs.org`, telling the two halves of what a
+cache promises. A build's first fetch fills the cache and the second is served
+without asking upstream — index and tarball both, counted on the *upstream's* end,
+because "served from cache" is unfalsifiable without a count of what upstream was
+asked. And the flip side: a no from upstream is passed through and remembered
+nowhere, while an upstream that cannot answer is a 502 and never a 404 — the
+distinction this service is the worst place on the platform to lose.
+
+Four things it proves that no `@QuarkusTest` here can: that the cache roots exist
+because the process *booted* (`MirrorStartupSeed` runs in `NORMAL` and never under
+`TEST`), that the shipped `${QITS_RESOURCE_DB_*}` datasource expression really
+resolves the platform's generic resource contract, that the absolute `dist.tarball`
+url built from the request is right, and that `/mirror/api`, `/artifacts/npm` and
+health coexist on one port.
+
+**`skipITs` is true and stays true.** `.config/qits/ci-event-userflows.yml` runs it
+by name — `-DskipITs=false "-Dit.test=PullThroughBootstrapIT"`, with
+`-Dquarkus.quinoa=false` — and publishes `target/userstories/` as the docs bundle
+`@userflows/qits-platform-mirror`, non-gating, one per commit. Default-on would drag
+the packaged-surface probe below into a client-less run the day it lands, and would
+make a plain `verify` spawn a second postgres for what CI runs anyway. `-Dnative`
+flips the property, so a native build runs it against the binary.
 
 `qits-db-core` carries both halves of the platform's datasource resilience, and this
 repository now uses both. `PatientPgDriver` is configuration rather than code — the
@@ -235,8 +264,11 @@ What is still ahead is not this service's to do alone: the **cutover**, which sp
 the client configuration (npm scoped registries, dockerd `registry-mirrors`, the maven
 repositories list) so third-party traffic arrives here rather than at `qits-artifacts`.
 
-The packaged-surface probe list needs a **rerun after the root-path flip**, and this
-repository carries no failsafe IT to do it — the list is run by hand on the fast-jar.
+The packaged-surface probe list needs a **rerun after the root-path flip**, and the
+failsafe IT this repository now has is not it: `PullThroughBootstrapIT` runs against
+a **client-less** artifact (`-Dquarkus.quinoa=false`, and the webui submodule arrives
+empty in a step container), so everything below that is about the SPA is out of its
+reach by construction. The list is still run by hand on the fast-jar.
 It was green on 2026-08-11 against the old `/mirror/` mount; what it must now show is
 `/` answering 200 HTML with `<base href="/">`, a deep link falling back to
 `index.html`, `/mirror/api/nope` and `/mirror/q/nope` 404 rather than a page, and a
