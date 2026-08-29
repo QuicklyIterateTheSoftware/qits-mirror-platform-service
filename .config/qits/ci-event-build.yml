@@ -1,46 +1,16 @@
-# The pipeline qits-ci runs on every push to a tracked branch of this repository.
-#
-# ONE STEP, TWO HALVES, and the split between them is the whole point — qits-artifacts' pipeline,
-# name for name:
-#
-#   1. build the explorer client (src/main/webui = the qits-platform-spa-mirror submodule) HERE, in
-#      the step container, which sits on qits-net and can therefore reach the platform's own npm
-#      registry — where @qits/ui-components lives and where nothing else can reach it from;
-#   2. build docker/Dockerfile, whose builder stage packages that already-built bundle and never
-#      runs an install.
-#
-# The step image is node-docker-base rather than ci-base because half one needs node, npm and git.
-#
-# THE TWO FLAGS THAT A CLIENT-LESS SIBLING STILL WOULD NEED. This repository is one application over two library
-# repositories — qits-blobstore and qits-registries-{common,npm,maven,oci} — published to the
-# platform's own Maven repository and available from nowhere else, so the builder stage has to be
-# able to reach it:
-#
-#   --network host        NOT a custom network: buildkit — the builder format the platform targets,
-#                         because a swarm cannot assume the legacy builder — refuses custom networks
-#                         on a build. Host networking is buildkit-supported and reaches the
-#                         registry's host-published address.
-#   --build-arg           names that address, derived from the same injected env the image tag uses,
-#                         so no address is stated here. The Dockerfile turns it into
-#                         -Dqits.maven.repository.url, which the pom's `qits-maven` repository reads
-#                         and .qits-maven-settings.xml mirrors, so a source-only build resolves the
-#                         four dependencies that are not on Maven Central.
-#
-# THE BOOTSTRAP ORDER THIS IMPLIES, and it is worth reading before the first deploy: those jars must
-# be RELEASED to the platform's Maven repository before this pipeline can be green. The build cannot
-# fall back on a developer's ~/.m2, and this service cannot serve its own build — a mirror's first
-# deploy must not depend on itself, so the Maven repository the builder reads is qits-artifacts',
-# never this one.
-#
-# Publish under the tag that is the whole contract with qits-deployments —
-# <registry>/<repository>/<this repo's name>:<sha>. The step's own container only drives the docker
-# CLI; the build and the push happen in the host's daemon through the socket this step declares
-# (docker: true).
-#
-# `set -eu` is load-bearing rather than tidy: the daemon runs this with `bash -c` and no -e, so
-# without it an early failure is swallowed by the next command's exit code and the run reports
-# SUCCESS. The deployer is then told an image exists that does not. -u makes an unset registry
-# variable stop the step too.
+# The image build, per push — moved from ci-post-receive.yml when this repo went domain-event-only,
+# the switch qits-githost and qits-artifacts already made. `checkout:` makes it a move rather than a
+# rewrite: the run builds the pushed branch at the pushed sha, but the pipeline is DISCOVERED at main,
+# so a pushed branch can no longer alter the CI that gates it. suppressCi restates what the
+# post-receive convention did with `-o qits.no-ci`. Separate from ci-event-userflows.yml on purpose:
+# that run is non-gating, a red verify must not cost the image.
+event: SCMPublishCommit
+when:
+  - repoId: { exact: qits-platform-mirror }
+    suppressCi: { exact: "false" }
+checkout:
+  branch: branch
+  sha: sha
 steps:
   - image: qits/build-images/node-docker-base:latest
     docker: true
