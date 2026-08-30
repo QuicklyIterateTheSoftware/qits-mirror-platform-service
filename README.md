@@ -1,10 +1,11 @@
-# qits-platform-mirror
+# qits-mirror-platform-service
 
-The platform's pull-through caches, and nothing else.
+The platform's pull-through caches, and nothing else, deployed as the `qits-platform-mirror`
+application.
 
-One deployable Quarkus application over two library repositories — `qits-blobstore`
-(the content-addressed store) and `qits-registries` (the npm, maven and OCI wire
-protocols). This repository holds what a library cannot: configuration, a schema,
+One deployable Quarkus application over one library repository, `qits-registries-javalib` —
+`qits-blobstore` (the content-addressed store) and the `qits-registries-*` jars (the npm, maven
+and OCI wire protocols). This repository holds what a library cannot: configuration, a schema,
 a seeder, and the explorer — a read-only admin API at `/mirror/api` with the
 Angular client that draws it, served at `/` on this service's own host,
 `mirror.<env>.<domain>`. That is the same authority dockerd, npm and maven already
@@ -40,7 +41,7 @@ would be a second eviction policy with no record of why it ran.
 |---|---|
 | `GET /mirror/api/repositories` | `{"repositories":[{name, type, upstream, createdAt}]}` — every cache root and what it fronts |
 | `GET /mirror/api/upstreams` | `{"upstreams":[{host, namespace, cachedImages, createdAt}]}` — every mirrored registry |
-| `/` on `mirror.<env>.<domain>` | the Angular client (`src/main/webui`, the `qits-platform-spa-mirror` submodule), built and served by Quinoa |
+| `/` on `mirror.<env>.<domain>` | the Angular client (`src/main/webui`, the `qits-mirror-platform-frontend` submodule), built and served by Quinoa |
 
 `name` and `type` on a repository and `host` on an upstream are the fields the client
 is **promised**; it draws everything else as a dynamic column typed by what the value
@@ -152,8 +153,9 @@ its default for every upstream key is a closed port so a test that has not opted
 into a stub cannot reach the internet by accident.
 
 Needs `eu.wohlben.qits:qits-blobstore` and `qits-registries-{common,npm,maven,oci}`
-installed locally (`./mvnw install` in each sibling repository) or released to the
-platform's Maven repository, which the `qits-maven` repository in `pom.xml` names.
+installed locally (`./mvnw install` in `components/qits-registries/qits-registries-javalib`,
+which builds them all) or released to the platform's Maven repository, which the
+`qits-maven` repository in `pom.xml` names.
 Both are pinned to `1.0.0-pgblobs-SNAPSHOT` while the PostgreSQL blob store is on
 its branch, so a build here needs those branches installed until they release.
 `qits-db-core` and `qits-arch-rules` come from that repository too, at released
