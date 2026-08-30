@@ -1,7 +1,7 @@
 package eu.wohlben.qits.mirror.gc;
 
-import eu.wohlben.qits.artifacts.control.ArtifactRepositoryService;
-import eu.wohlben.qits.artifacts.control.BlobStore;
+import eu.wohlben.qits.blobstore.control.ArtifactRepositoryService;
+import eu.wohlben.qits.blobstore.control.BlobStore;
 import eu.wohlben.qits.artifacts.control.MavenProxyProfile;
 import eu.wohlben.qits.artifacts.control.NpmProxyProfile;
 import eu.wohlben.qits.artifacts.control.OciMediaTypes;
@@ -13,7 +13,7 @@ import eu.wohlben.qits.artifacts.entity.NpmVersion;
 import eu.wohlben.qits.artifacts.entity.OciManifest;
 import eu.wohlben.qits.artifacts.entity.OciMirrorTagCheck;
 import eu.wohlben.qits.artifacts.entity.OciTag;
-import eu.wohlben.qits.artifacts.persistence.ArtifactRecordRepository;
+import eu.wohlben.qits.blobstore.persistence.ArtifactRecordRepository;
 import eu.wohlben.qits.artifacts.persistence.MavenArtifactRepository;
 import eu.wohlben.qits.artifacts.persistence.MavenProxyMetadataRepository;
 import eu.wohlben.qits.artifacts.persistence.NpmDistTagRepository;

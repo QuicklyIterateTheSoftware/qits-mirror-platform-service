@@ -1,10 +1,10 @@
 package eu.wohlben.qits.mirror.gc;
 
-import eu.wohlben.qits.artifacts.control.BlobDiskIndex;
+import eu.wohlben.qits.blobstore.control.BlobDiskIndex;
 import eu.wohlben.qits.artifacts.control.OciManifestFootprints;
-import eu.wohlben.qits.artifacts.entity.ArtifactRepository;
-import eu.wohlben.qits.artifacts.persistence.ArtifactRecordRepository;
-import eu.wohlben.qits.artifacts.persistence.ArtifactRepositoryRepository;
+import eu.wohlben.qits.blobstore.entity.ArtifactRepository;
+import eu.wohlben.qits.blobstore.persistence.ArtifactRecordRepository;
+import eu.wohlben.qits.blobstore.persistence.ArtifactRepositoryRepository;
 import eu.wohlben.qits.artifacts.persistence.MavenArtifactRepository;
 import eu.wohlben.qits.artifacts.persistence.NpmVersionRepository;
 import eu.wohlben.qits.artifacts.persistence.OciManifestRepository;

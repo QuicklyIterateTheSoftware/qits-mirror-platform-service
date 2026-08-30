@@ -26,16 +26,20 @@
          nothing to defend, because it has no write. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-platform-mirror</artifactId>
-    <version>2026.830.35518</version>
+    <version>2026.830.190940</version>
     <packaging>quarkus</packaging>
     <name>qits-platform-mirror</name>
 
     <properties>
         <!-- The PG-only blob store. Both libraries moved their bytes out of the filesystem and into
              three PostgreSQL tables. The campaign has released, so both are pinned at their
-             calver. -->
-        <qits.blobstore.version>2026.818.45340</qits.blobstore.version>
-        <qits.registries.version>2026.818.45443</qits.registries.version>
+             calver.
+             ONE VERSION FOR BOTH since 2026.830.175757: the store builds inside the qits-registries
+             reactor now and ships on its version. The two pins must move together — the format jars
+             are compiled against the store's classes, and the store's packages are
+             eu.wohlben.qits.blobstore.* since this release. -->
+        <qits.blobstore.version>2026.830.175757</qits.blobstore.version>
+        <qits.registries.version>2026.830.175757</qits.registries.version>
         <!-- The platform's datasource resilience baseline: qits-db-core carries PatientPgDriver,
              which the datasource block in application.properties names, and qits-arch-rules carries
              the test that fails this build when a postgresql datasource is missing a line of that

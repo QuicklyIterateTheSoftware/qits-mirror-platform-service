@@ -1,7 +1,7 @@
 package eu.wohlben.qits.mirror.gc;
 
-import eu.wohlben.qits.artifacts.control.BlobReclaim;
-import eu.wohlben.qits.artifacts.control.BlobStore;
+import eu.wohlben.qits.blobstore.control.BlobReclaim;
+import eu.wohlben.qits.blobstore.control.BlobStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.time.Duration;

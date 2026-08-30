@@ -1,6 +1,6 @@
 package eu.wohlben.qits.mirror;
 
-import eu.wohlben.qits.artifacts.control.ArtifactRepositoryService;
+import eu.wohlben.qits.blobstore.control.ArtifactRepositoryService;
 import eu.wohlben.qits.artifacts.control.MavenProxyProfile;
 import eu.wohlben.qits.artifacts.control.NpmProxyProfile;
 import eu.wohlben.qits.artifacts.control.OciMirrorUpstreams;

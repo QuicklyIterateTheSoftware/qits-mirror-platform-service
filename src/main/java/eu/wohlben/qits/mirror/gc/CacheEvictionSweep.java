@@ -1,6 +1,6 @@
 package eu.wohlben.qits.mirror.gc;
 
-import eu.wohlben.qits.artifacts.control.BlobReclaim;
+import eu.wohlben.qits.blobstore.control.BlobReclaim;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.context.control.ActivateRequestContext;

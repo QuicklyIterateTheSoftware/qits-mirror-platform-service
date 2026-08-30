@@ -1,7 +1,7 @@
 package eu.wohlben.qits.mirror.gc;
 
-import eu.wohlben.qits.artifacts.entity.ArtifactRepository;
-import eu.wohlben.qits.artifacts.persistence.ArtifactRepositoryRepository;
+import eu.wohlben.qits.blobstore.entity.ArtifactRepository;
+import eu.wohlben.qits.blobstore.persistence.ArtifactRepositoryRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.ArrayList;

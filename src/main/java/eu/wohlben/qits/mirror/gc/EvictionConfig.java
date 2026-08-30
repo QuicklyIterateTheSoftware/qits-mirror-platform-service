@@ -1,6 +1,6 @@
 package eu.wohlben.qits.mirror.gc;
 
-import eu.wohlben.qits.artifacts.entity.RepositoryTypeProfile;
+import eu.wohlben.qits.blobstore.entity.RepositoryTypeProfile;
 import io.smallrye.config.ConfigMapping;
 import java.time.Duration;
 import java.util.Map;
