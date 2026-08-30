@@ -11,6 +11,13 @@
 # the opposite of what a pull-through cache is for. One instance, warmed by every environment's
 # builds, is the whole reason this service was split out of qits-artifacts
 # (byte-plane-split-plan.md).
+
+# THE NAME THIS DEPLOYS AS, spelled because the repository is renamed and the application is not.
+# Every derivation the deployer makes hangs off this name — the wire alias peers dial, the container
+# it manages, the extras family, the database — so letting it follow the repository would
+# decommission the running service and start a stranger beside it.
+application: qits-platform-mirror
+
 deployment_target: platform
 
 # One route for this application's machine surface: the admin API at /mirror/api and health at

@@ -1,6 +1,6 @@
 # The per-commit userflow run: `mvn verify` at the pushed commit — which regenerates
 # target/userstories/ through the story catalogue in src/test/java/.../mirror/stories/ — and the
-# reports published as one docs bundle, site @userflows/qits-platform-mirror, version = the bare
+# reports published as one docs bundle, site @userflows/qits-mirror-platform-service, version = the bare
 # commit sha, branch riding as artifacts metadata for discovery.
 #
 # NON-GATING BY DESIGN, which is why it is a separate file from ci-post-receive.yml: this run going
@@ -66,7 +66,7 @@
 #
 # Quinoa is off (`-Dquarkus.quinoa=false` — the extension's root toggle; `.enabled` is silently
 # ignored and npm still runs): the explorer client is ci-post-receive.yml's business, where the
-# qits-platform-spa-mirror submodule is initialised and its lockfile origins are swapped against the
+# qits-mirror-platform-frontend submodule is initialised and its lockfile origins are swapped against the
 # platform's two npm services, and none of that ritual belongs here — the stories assert nothing
 # about the SPA. It is also what keeps this step from needing the submodule at all: the daemon's
 # clone does not recurse, so src/main/webui arrives EMPTY, and an empty directory is the one case
@@ -116,7 +116,10 @@
 # versions are immutable, so 409 is success (the qits-spa-ui-components release file's discipline).
 event: SCMPublishCommit
 when:
-  - repoId: { exact: qits-platform-mirror }
+  # repoName, not repoId: since the identity cutover the git host's own coordinate is an opaque
+  # UUID, so a name match belongs on the name. The event echoes the public name the push was
+  # addressed with; a rename updates this line in the same campaign.
+  - repoName: { exact: qits-mirror-platform-service }
     suppressCi: { exact: "false" }
 checkout:
   branch: branch
@@ -148,10 +151,10 @@ steps:
         -X PUT --data-binary @userstories.tgz \
         -H "X-Artifacts-Meta-git.branch.name: $QITS_CI_BRANCH" \
         -H "X-Artifacts-Meta-git.commit.hash: $QITS_CI_SHA" \
-        -H "X-Artifacts-Meta-git.repository.name: qits-platform-mirror" \
-        "$QITS_DOCS_URL/@userflows/qits-platform-mirror/-/$QITS_CI_SHA")
+        -H "X-Artifacts-Meta-git.repository.name: qits-mirror-platform-service" \
+        "$QITS_DOCS_URL/@userflows/qits-mirror-platform-service/-/$QITS_CI_SHA")
       case "$status" in
-        201) echo "published userflows for qits-platform-mirror@$QITS_CI_SHA ($QITS_CI_BRANCH)" ;;
-        409) echo "userflows for qits-platform-mirror@$QITS_CI_SHA already published — skipping" ;;
+        201) echo "published userflows for qits-mirror-platform-service@$QITS_CI_SHA ($QITS_CI_BRANCH)" ;;
+        409) echo "userflows for qits-mirror-platform-service@$QITS_CI_SHA already published — skipping" ;;
         *)   echo "docs publish failed: HTTP $status"; cat /tmp/docs-publish.out; exit 1 ;;
       esac

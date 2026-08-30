@@ -1,6 +1,6 @@
-[submodule "qits-platform-spa-mirror"]
+[submodule "qits-mirror-platform-frontend"]
 	path = src/main/webui
-	url = https://github.com/QuicklyIterateTheSoftware/qits-platform-spa-mirror.git
+	url = https://github.com/QuicklyIterateTheSoftware/qits-mirror-platform-frontend.git
 	ignore = all
 	update = merge
 	branch = main

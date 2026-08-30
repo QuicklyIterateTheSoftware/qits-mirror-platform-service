@@ -21,7 +21,7 @@
 # blocked by the state of the thing it is releasing.
 event: SCMRelease
 when:
-  - repository: { exact: qits-platform-mirror }
+  - repository: { exact: qits-mirror-platform-service }
 artifacts:
   - { type: docker, name: qits/qits-platform-mirror }
 steps:
@@ -51,13 +51,13 @@ steps:
       git checkout --detach "$version"
 
       # --- half one: the bundle -----------------------------------------------------------------
-      # The clone is shallow and does not recurse, so qits-platform-spa-mirror arrives as an empty
+      # The clone is shallow and does not recurse, so qits-mirror-platform-frontend arrives as an empty
       # directory and Quinoa fails the image build on it. The `checkout --detach` above is what makes
       # this land on the gitlink the RELEASE recorded rather than on main's. See ci-post-receive.yml
       # for why the lockfile origins are rewritten, why the order of the two sed expressions matters,
       # and why the registry is passed as environment rather than as a file.
-      frontend_url="${QITS_CI_REPOSITORY_URL%/*}/qits-platform-spa-mirror"
-      git -c submodule.qits-platform-spa-mirror.url="$frontend_url" submodule update --init src/main/webui
+      frontend_url="${QITS_CI_REPOSITORY_URL%/*}/qits-mirror-platform-frontend"
+      git -c submodule.qits-mirror-platform-frontend.url="$frontend_url" submodule update --init src/main/webui
 
       cd src/main/webui
       npm_hosted_origin=$(node -p 'new URL(process.env.QITS_NPM_REGISTRY_URL).origin')
