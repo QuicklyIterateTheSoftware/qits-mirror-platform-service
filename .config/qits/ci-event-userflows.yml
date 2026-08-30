@@ -1,30 +1,59 @@
 # The per-commit userflow run: `mvn verify` at the pushed commit — which regenerates
-# target/userstories/ through PullThroughBootstrapIT — and the reports published as one docs bundle,
-# site @userflows/qits-platform-mirror, version = the bare commit sha, branch riding as artifacts
-# metadata for discovery.
+# target/userstories/ through the story catalogue in src/test/java/.../mirror/stories/ — and the
+# reports published as one docs bundle, site @userflows/qits-platform-mirror, version = the bare
+# commit sha, branch riding as artifacts metadata for discovery.
 #
 # NON-GATING BY DESIGN, which is why it is a separate file from ci-post-receive.yml: this run going
 # red must not cost the branch its image while "quality gate before merging" is still a decision to
 # be taken — when it is, these per-commit runs are what the gate reads. One run per push per branch,
 # collapsed to the newest tip under burst.
 #
-# WHAT THE STORIES ARE. This service is the platform's pull-through caches and nothing else, so the
-# two stories are the two halves of what a cache promises. The first: a build's first fetch fills the
-# cache and the second is served without asking upstream — the index and the tarball both, counted on
-# the UPSTREAM's end, because "served from cache" is unfalsifiable without a count of what upstream
-# was asked. The second: a no from upstream is passed through and remembered nowhere, while an
-# upstream that cannot answer is a 502 and never a 404 — the distinction this service is the worst
-# place on the platform to lose, since a wrong "there is no such thing" is cached by every npm, maven
-# and docker client that asked.
+# WHAT THE STORIES ARE. Thirteen of them over seven classes, all against ONE launched artifact (one
+# @TestProfile, so one mirror and one cache), and all arranged around a single negative: a cache's
+# central claim is not about a response, it is about a request that was NEVER MADE. So the warm story
+# on each of the three planes ends in assertNoEdgesTo(<the registry>) — a hit that quietly dialled
+# upstream would pass every other test in this repository and would cost money on every CI run.
 #
-# THE FAR SIDE IS A RECORDING MockService IMPERSONATING registry.npmjs.org — the literal default of
-# qits.artifacts.npm.proxy.upstream, so the sequence diagram names the address a deployment really
-# dials. The other two upstreams (Maven Central, and the OCI endpoint derived from the seeded
-# oci_mirror_upstream rows) are pointed at a closed port by the IT's own @TestProfile: no story
-# resolves a jar or pulls an image, and a key left at its shipped value would let a mistyped path
-# reach the real internet from a step container, where it would pass or fail for reasons unrelated to
-# this code. A MIRROR MUST NOT BUILD THROUGH ITSELF still holds here as everywhere: the Maven
-# repository this step reads is qits-artifacts', never this deployment's.
+#   caching     the npm cold miss, counted on the UPSTREAM's end, and then the warm read that
+#               reaches nobody at all
+#   npm         the same pair driven by the REAL npm CLI, which follows the rewritten dist.tarball
+#               (not a config key — only a real client on a real port can show it is right) and
+#               verifies upstream's integrity against the bytes this cache served
+#   maven       the JVM plane: upstream's own .sha1 cached vs the metadata .sha1 derived, five reads
+#               for four fetches, then a resolve that never leaves the process
+#   oci         the container plane: a manifest byte-for-byte with the digest a client verifies,
+#               blobs verified as they stream, then a pull that reaches no registry
+#   outage      the registry goes DARK mid-story: what is cached keeps installing, what was never
+#               cached is a 502 that names it, and past the packument TTL the STALE document is
+#               served — proved by polling until a read that used to cost the registry nothing
+#               starts costing it a dropped dial
+#   refusals    a no is passed through and REMEMBERED NOWHERE (the second ask reaches upstream too),
+#               and an upstream that cannot answer is a 502 and never a 404 — the distinction this
+#               service is the worst place on the platform to lose, since a wrong "there is no such
+#               thing" is cached by every npm, maven and docker client that asked
+#   operations  the explorer's read-only inventory, and that reading it dials NONE of the three
+#
+# THE FAR SIDE IS THREE RECORDING STAND-INS, one per plane, each NAMED AFTER THE ADDRESS A DEPLOYMENT
+# REALLY DIALS — registry.npmjs.org, repo1.maven.org, quay.io — so the network diagrams carry the
+# dependency the shipped configuration declares rather than a fixture's alias. All three are
+# stories/support/RecordingUpstream, a test-only class in this repository: it serves BINARY bodies (a
+# real gzipped USTAR tarball, a jar, an OCI layer), can be armed FROM A STORY METHOD (the outage
+# story), can decline to answer at all (an outage is a dropped connection, not a 500), and records
+# the STATUS it answered with. qits-service-mock's MockService could do none of those four and is no
+# longer a dependency of this repository; see pom.xml.
+#
+# Every upstream key is moved, so nothing reaches the real internet from a step container: a key left
+# at its shipped value would let a mistyped path pass or fail for reasons unrelated to this code. A
+# MIRROR MUST NOT BUILD THROUGH ITSELF still holds here as everywhere: the Maven repository this step
+# reads is qits-artifacts', never this deployment's.
+#
+# NPM IS THE ONE REAL CLI, and that is a decision rather than a gap. maven is not driven by the real
+# launcher because it would be a second Maven JVM inside a build that already has one plus a failsafe
+# fork, a launched artifact and an embedded postgres; the OCI plane is not driven by `docker pull`
+# because a pull is executed by a DAEMON, which resolves the loopback address in another network
+# namespace and demands TLS or an insecure-registries entry, and skopeo is not in this image. Both
+# planes are driven on the wire instead, which keeps every claim that is about THIS service. The npm
+# stories skip themselves (@EnabledIf) on a machine with no npm — maven-base has one.
 #
 # `user: build`, and NOT a switch inside the script. This repository's suite spawns a REAL postgres —
 # zonky binaries resolved as ordinary Maven artifacts and run as a child process, never a container —
@@ -58,24 +87,27 @@
 #      plus a launched process would change the clone-alone build the README documents, for
 #      everybody, to run what this pipeline runs anyway.
 #
-# Naming the class keeps the opt-in to this pipeline and to this story, and keeps the property's own
-# meaning ("run everything") intact for the `native` profile that sets it:
-# `-DskipITs=false "-Dit.test=PullThroughBootstrapIT"`.
+# Naming the classes keeps the opt-in to this pipeline and to these stories, and keeps the property's
+# own meaning ("run everything") intact for the `native` profile that sets it. EVERY STORY CLASS IS
+# LISTED BELOW and a new one must be added here in the same commit — an unlisted class is silently
+# never run, and its stories simply never appear in the bundle.
 #
-# NO REPAIR WAS NEEDED to make the two new test-scope jars resolve. This repository already carries
+# NO REPAIR WAS NEEDED to make the test-scope framework jar resolve. This repository already carries
 # `.qits-maven-settings.xml` at its root and a `qits-maven` <repositories> entry — qits-blobstore,
 # the three qits-registries jars, qits-db-core and qits-arch-rules have always come from the
 # platform registry — so docker/Dockerfile's `-s .qits-maven-settings.xml … package -Dnative
-# -DskipTests` resolves qits-userflows and qits-service-mock there exactly as it already resolved
-# those. (`-DskipTests` skips test EXECUTION, not test compilation, so both jars are fetched during
-# an image build too; qits-userflows' transitive Playwright is a jar, not a browser — nothing
-# downloads Chromium unless a story asks for a `Flow`, and neither of these does.) The same holds for
+# -DskipTests` resolves qits-userflows there exactly as it already resolved those. (`-DskipTests`
+# skips test EXECUTION, not test compilation, so it is fetched during an image build too;
+# qits-userflows' transitive Playwright is a jar, not a browser — nothing downloads Chromium unless a
+# story asks for a `Flow`, and no story in this catalogue does.) The same holds for
 # ci-post-receive.yml and ci-event-release.yml, which build that Dockerfile with `--network host` and
 # the Maven repository build arg and needed no edit.
 #
 # TIMEOUT. Longer than the fleet's usual 2400: this suite restarts Quarkus once per @TestProfile
 # across the npm, maven, OCI and eviction classes against a real postgres, and `verify` then packages
-# the fast-jar and launches it for the IT. 3600 is headroom, not an expectation.
+# the fast-jar and launches it once for the whole catalogue. The catalogue itself is fast — around
+# 45 seconds, of which 30 is the outage story waiting out the packument TTL, which is the one thing
+# here that costs wall clock rather than work. 3600 is headroom, not an expectation.
 #
 # Loop review: this pipeline PUTs a docs bundle and pushes no commit — no cycle. The bundle goes to
 # qits-artifacts and is read back by qits-docs, neither of which is this service; the one thing that
@@ -102,7 +134,8 @@ steps:
       ./mvnw -B -ntp -s .qits-maven-settings.xml verify \
         -Dqits.maven.repository.url="$QITS_MAVEN_REPOSITORY_URL" \
         -Dquarkus.quinoa=false \
-        -DskipITs=false "-Dit.test=PullThroughBootstrapIT"
+        -DskipITs=false \
+        "-Dit.test=PullThroughBootstrapIT,MavenPullThroughIT,NpmInstallThroughTheMirrorIT,ImagePullThroughIT,CacheInventoryIT,StaleThroughAnOutageIT,UpstreamRefusalIT"
 
       # `-C … .` so the story directories are the bundle's roots — nesting one directory deep would
       # put it in every served URL. SINGLE-MODULE repository, so the path is target/userstories and

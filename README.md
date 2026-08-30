@@ -158,35 +158,66 @@ Both are pinned to `1.0.0-pgblobs-SNAPSHOT` while the PostgreSQL blob store is o
 its branch, so a build here needs those branches installed until they release.
 `qits-db-core` and `qits-arch-rules` come from that repository too, at released
 versions — the datasource resilience baseline and the test that enforces it.
-`qits-userflows` and `qits-service-mock` join them in **test scope** for the
-userflow below.
+`qits-userflows` joins them in **test scope** for the catalogue below.
 
-### The userflow
+### The userflow catalogue
 
-`PullThroughBootstrapIT` is this repository's one integration test and its one
-**user story**: the whole service as it is *packaged*, launched beside a recording
-`MockService` standing in for `registry.npmjs.org`, telling the two halves of what a
-cache promises. A build's first fetch fills the cache and the second is served
-without asking upstream — index and tarball both, counted on the *upstream's* end,
-because "served from cache" is unfalsifiable without a count of what upstream was
-asked. And the flip side: a no from upstream is passed through and remembered
-nowhere, while an upstream that cannot answer is a 502 and never a 404 — the
-distinction this service is the worst place on the platform to lose.
+`src/test/java/eu/wohlben/qits/mirror/stories/` is **thirteen user stories over seven
+classes**, all against one launched artifact (one `StoryProfile`, so one mirror and one
+cache) with a recording stand-in where each of the three registries this service caches
+really is. Each story emits its steps, its notes and an **observed** network diagram
+under `target/userstories/`.
 
-Four things it proves that no `@QuarkusTest` here can: that the cache roots exist
+Everything here is arranged around **one negative**. A cache's central claim is not
+about a response, it is about a request that was never made — so the warm story on each
+plane ends in `assertNoEdgesTo(<the registry>)`, taken against a stand-in that is up and
+recording throughout. A hit that quietly dialled upstream would pass every other test in
+this repository and cost money on every CI run.
+
+| category     | stories | what it settles |
+| ------------ | ------- | ---------------- |
+| `caching`    | 2 | the npm cold miss (counted on the *upstream's* end) and then the warm read that reaches nobody |
+| `npm`        | 2 | the same pair driven by the **real npm CLI** — which follows the rewritten `dist.tarball` and verifies upstream's `integrity` end to end |
+| `maven`      | 2 | the JVM plane: cached vs derived checksums, five reads for four fetches, then a resolve that never leaves the process |
+| `oci`        | 2 | the container plane: manifest byte-for-byte with its digest, blobs verified as they stream, then a pull that reaches no registry |
+| `outage`     | 2 | the registry goes **dark** mid-story: what is cached keeps installing, what was never cached is a 502, and past the TTL the stale document is served |
+| `refusals`   | 2 | a no is passed through and **remembered nowhere**, and an upstream that cannot answer is a 502 and never a 404 |
+| `operations` | 1 | the explorer's read-only inventory — and that reading it dials **none** of the three registries |
+
+Five things they prove that no `@QuarkusTest` here can: that the cache roots exist
 because the process *booted* (`MirrorStartupSeed` runs in `NORMAL` and never under
-`TEST`), that the shipped `${QITS_RESOURCE_DB_*}` datasource expression really
-resolves the platform's generic resource contract, that the absolute `dist.tarball`
-url built from the request is right, and that `/mirror/api`, `/artifacts/npm` and
-health coexist on one port.
+`TEST`), that the shipped `${QITS_RESOURCE_DB_*}` datasource expression really resolves
+the platform's generic resource contract, that the absolute `dist.tarball` url built
+from the request is right (npm follows it), that a real gzipped archive survives the
+round trip, and that `/mirror/api`, `/artifacts/npm|maven`, `/v2` and health coexist on
+one port.
 
-**`skipITs` is true and stays true.** `.config/qits/ci-event-userflows.yml` runs it
-by name — `-DskipITs=false "-Dit.test=PullThroughBootstrapIT"`, with
-`-Dquarkus.quinoa=false` — and publishes `target/userstories/` as the docs bundle
-`@userflows/qits-platform-mirror`, non-gating, one per commit. Default-on would drag
-the packaged-surface probe below into a client-less run the day it lands, and would
-make a plain `verify` spawn a second postgres for what CI runs anyway. `-Dnative`
-flips the property, so a native build runs it against the binary.
+Two mechanisms are worth knowing before editing a story:
+
+- **`stories/support/RecordingUpstream`** is the far side, and it replaced
+  `qits-service-mock`. A `MockService` serializes every body as JSON, can only be armed
+  from the instance that started it, cannot decline to answer, and does not record the
+  status it gave — which rules out a real tarball, a jar, an OCI layer, and the outage
+  story's mid-story blackout. `qits-service-mock` is no longer a dependency here; it
+  remains the right tool for standing in for another JSON API.
+- **`stories/support/AccessLogTap`** is the incoming tap for the npm CLI stories, and it
+  is **armed**. npm talks to the launched process over a socket this JVM never touches,
+  so its traffic exists only in the server's access log — but every RestAssured story's
+  traffic is in that log too, so an always-on source would draw each of those edges
+  twice. Exactly one class arms it.
+
+Three classes pin `@TestMethodOrder`, and in each it is load-bearing rather than tidy:
+"warm" is a state the cold story creates, and a cumulative upstream recording is
+attributed by a cursor, so the cold story's fetches belong on the cold story's diagram
+and the warm story's empty slice is what the negative reads.
+
+**`skipITs` is true and stays true.** `.config/qits/ci-event-userflows.yml` names every
+story class — `-DskipITs=false "-Dit.test=…"`, with `-Dquarkus.quinoa=false` — and
+publishes `target/userstories/` as the docs bundle `@userflows/qits-platform-mirror`,
+non-gating, one per commit. Default-on would drag the packaged-surface probe below into
+a client-less run the day it lands, and would make a plain `verify` spawn a second
+postgres for what CI runs anyway. `-Dnative` flips the property, so a native build runs
+the catalogue against the binary.
 
 `qits-db-core` carries both halves of the platform's datasource resilience, and this
 repository now uses both. `PatientPgDriver` is configuration rather than code — the
@@ -265,7 +296,7 @@ the client configuration (npm scoped registries, dockerd `registry-mirrors`, the
 repositories list) so third-party traffic arrives here rather than at `qits-artifacts`.
 
 The packaged-surface probe list needs a **rerun after the root-path flip**, and the
-failsafe IT this repository now has is not it: `PullThroughBootstrapIT` runs against
+userflow catalogue this repository now has is not it: every story runs against
 a **client-less** artifact (`-Dquarkus.quinoa=false`, and the webui submodule arrives
 empty in a step container), so everything below that is about the SPA is out of its
 reach by construction. The list is still run by hand on the fast-jar.
