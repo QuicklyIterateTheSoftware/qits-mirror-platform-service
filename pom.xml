@@ -26,7 +26,7 @@
          nothing to defend, because it has no write. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-platform-mirror</artifactId>
-    <version>2026.829.140504</version>
+    <version>2026.830.35518</version>
     <packaging>quarkus</packaging>
     <name>qits-platform-mirror</name>
 
@@ -64,19 +64,29 @@
              qits-artifacts and every other SPA-serving service. -->
         <quinoa.version>2.8.2</quinoa.version>
 
-        <!-- The user-story framework (TEST SCOPE ONLY): PullThroughBootstrapIT is written as
-             @UserStory methods, so the packaged pull-through proof doubles as documentation —
-             steps, interactions and a sequence diagram emitted under target/userstories/, published
-             per commit by .config/qits/ci-event-userflows.yml. Published out of
-             libs/qits-userflows to the platform's own Maven repository, which is the same
-             `qits-maven` repository below that qits-blobstore, the three qits-registries jars,
-             qits-db-core and qits-arch-rules already come from — so nothing about resolution
-             changes and neither docker/Dockerfile nor either pipeline needed a repair. -->
-        <qits.userflows.version>2026.828.153026</qits.userflows.version>
-        <!-- The recording service mock the same IT boots against — the generic MockService, which
-             stands in for the upstream registry this service is a cache OF
-             (qits.artifacts.npm.proxy.upstream). Released out of libs/qits-integrations-quarkus. -->
-        <qits.service-mock.version>2026.827.71232</qits.service-mock.version>
+        <!-- The user-story framework (TEST SCOPE ONLY). src/test/java/.../mirror/stories/ is a
+             CATALOGUE of @UserStory methods — thirteen stories over the three planes this service
+             caches — so the packaged proof doubles as documentation: steps, notes and an OBSERVED
+             network diagram emitted under target/userstories/ and published per commit by
+             .config/qits/ci-event-userflows.yml. Published out of libs/qits-userflows to the
+             platform's own Maven repository, which is the same `qits-maven` repository below that
+             qits-blobstore, the three qits-registries jars, qits-db-core and qits-arch-rules
+             already come from — so nothing about resolution changes and neither docker/Dockerfile
+             nor either pipeline needed a repair.
+
+             qits-service-mock USED TO SIT BESIDE IT AND NO LONGER DOES. The one story class this
+             repository had stood a MockService where npmjs is, and it was a good fit for what that
+             class claimed. The catalogue that replaced it needs four things MockService cannot do:
+             serve BINARY bodies (it serializes everything as JSON, so a real gzipped tarball, a jar
+             and an OCI layer were all out of reach — and with them the real `npm install` story),
+             be ARMED FROM A STORY METHOD (its stubs live on the instance that started the server,
+             while the outage story turns a registry dark mid-story), NOT ANSWER AT ALL (an outage
+             is a dropped connection, not a 500), and record the STATUS it answered with. The
+             replacement is stories/support/RecordingUpstream — a test-only stand-in in this
+             repository, ~350 lines, which that class's javadoc justifies line by line. MockService
+             remains the right tool for standing in for another JSON API; a cache's upstream is a
+             byte store, which is a different job. -->
+        <qits.userflows.version>2026.829.201516</qits.userflows.version>
 
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
@@ -332,30 +342,15 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <!-- The user-story framework: PullThroughBootstrapIT is written as @UserStory methods,
-                 so the packaged-boot proof doubles as documentation. Both its stories are
-                 browserless (an Interactions parameter and no Flow), so the transitive Playwright
-                 never launches anything and no browser is ever downloaded — which is what lets the
-                 userflow pipeline run in a step container with no Chromium in it. -->
+            <!-- The user-story framework: the whole of src/test/java/.../mirror/stories/ is
+                 written as @UserStory methods, so the packaged proof doubles as documentation.
+                 Every story is browserless (an Interactions/Network/Commands parameter and no
+                 Flow), so the transitive Playwright never launches anything and no browser is ever
+                 downloaded — which is what lets the userflow pipeline run in a step container with
+                 no Chromium in it. -->
             <groupId>${project.groupId}</groupId>
             <artifactId>qits-userflows</artifactId>
             <version>${qits.userflows.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <!-- The recording service mock. The IT points qits.artifacts.npm.proxy.upstream at a
-                 MockService stubbed with npmjs' own packument and tarball shapes, and its
-                 recordings are what make every caching claim assertable on the UPSTREAM's end as
-                 well as the client's: "served from cache" means nothing without a count of what
-                 upstream was asked.
-
-                 It does NOT replace npm/StubNpmRegistry and is not meant to. That stub speaks the
-                 protocol's harder halves — ETag revalidation, 304s, a reachability switch, real
-                 gzipped USTAR tarballs — for the @QuarkusTest suites; this one is the generic
-                 cross-service recorder the userflow needs, and the two live side by side. -->
-            <groupId>${project.groupId}</groupId>
-            <artifactId>qits-service-mock</artifactId>
-            <version>${qits.service-mock.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
