@@ -26,7 +26,7 @@
          nothing to defend, because it has no write. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-platform-mirror</artifactId>
-    <version>2026.902.112131</version>
+    <version>2026.902.141554</version>
     <packaging>quarkus</packaging>
     <name>qits-platform-mirror</name>
 
