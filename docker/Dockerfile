@@ -174,7 +174,27 @@ RUN --mount=type=secret,id=qits-client-id,env=QITS_MAVEN_AUTH_USR \
       -Dquarkus.quinoa.package-manager-install.node-version=22.22.0 \
       -Dquarkus.quinoa.package-manager-command.install=--version \
       -Dquarkus.quinoa.package-manager-command.ci=--version \
-      -Dquarkus.quinoa.package-manager-command.build=--version
+      -Dquarkus.quinoa.package-manager-command.build=--version \
+      org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom \
+      -DoutputFormat=json -DoutputName=sbom -DschemaVersion=1.6 \
+      -Dcyclonedx.skipNotDeployed=false
+# cyclonedx.skipNotDeployed=false is LOAD-BEARING, measured on qits-artifacts-service's first SBOM
+# release (2026.902.45658): a module that skips maven-deploy — this one does, it ships as this image
+# and not as a jar — is SKIPPED by the plugin by default, with a green build and one INFO line. The
+# sbom stage's COPY then fails on a file nothing wrote. The property spelling matters too: the bare
+# -DskipNotDeployed=false is silently ignored; only the cyclonedx.-prefixed one reaches the plugin.
+
+# --- sbom -----------------------------------------------------------------------------------------
+# This repository's CycloneDX document, exported so the release step can PUT it to the platform's
+# SBOM store. One module, so it is at target/ and not service/target/, the same asymmetry the
+# binary's COPY below carries. A stage rather than a layer of the runtime image, and BEFORE the
+# runtime stage on purpose: the last stage is what a plain `docker build` builds, and that must stay
+# the image. The release step reaches this one with `--target sbom --output type=local` using the
+# SAME args and secrets as the image build, so every layer above is a cache hit and the export costs
+# seconds. `makeBom` rides on the mvnw invocation above rather than a second one, for the same cache
+# reason — one RUN, one layer, one truth.
+FROM scratch AS sbom
+COPY --from=build /src/target/sbom.json /sbom.json
 
 # --- runtime --------------------------------------------------------------------------------------
 # `mirror.dev.localhost:8080/redhat/…` is the same mirror, pointed at registry.access.redhat.com.
