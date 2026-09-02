@@ -87,10 +87,17 @@ steps:
       # Unconditional on purpose: a missing env source is NOT an error — measured on buildx v0.36.1,
       # `--secret id=x,env=DOES_NOT_EXIST` builds green and the mounted variable is simply unset —
       # so these lines do nothing at all until a run carries the pair.
+      # QITS_MAVEN_CENTRAL_URL is passed EMPTY, and stays empty: the rule the userflow step's
+      # note carries holds here too — this repository builds qits-platform-mirror, so pointing
+      # its own image build at the mirror's pull-through cache would be the mirror built
+      # through itself. It was `${QITS_MAVEN_CENTRAL_MIRROR_URL:-}`, the fleet-wide spelling,
+      # which is inert only for as long as nothing injects that variable. Central is dialled
+      # directly instead. Passed rather than dropped so the Dockerfile keeps one shape across
+      # every call site.
       ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-platform-mirror:$QITS_CI_SHA"
       docker build --network host \
         --build-arg QITS_MAVEN_REPOSITORY_URL="http://$QITS_REGISTRY/artifacts/maven/maven" \
-        --build-arg QITS_MAVEN_CENTRAL_URL="${QITS_MAVEN_CENTRAL_MIRROR_URL:-}" \
+        --build-arg QITS_MAVEN_CENTRAL_URL="" \
         --secret id=qits-client-id,env=QITS_COMMISSIONED_CLIENT_ID \
         --secret id=qits-client-secret,env=QITS_COMMISSIONED_CLIENT_SECRET \
         -t "$ref" -f docker/Dockerfile .

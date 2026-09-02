@@ -134,10 +134,18 @@ steps:
       # names a host-published address unreachable from a step container, and the exact-id mirror
       # in .qits-maven-settings.xml is what passes Maven's HTTP blocker.
       export QITS_MAVEN_REPOSITORY_URL="$QITS_MAVEN_REGISTRY_URL"
-      # Maven Central through the platform mirror's in-network alias — empty (an older qits-ci that
-      # injects nothing, or a deployment that turned the mirror plane off) deactivates the settings
-      # profile and Central is resolved directly.
-      export QITS_MAVEN_CENTRAL_URL="${QITS_MAVEN_PROXY_URL:-}"
+      # NO QITS_MAVEN_CENTRAL_URL HERE, AND THAT IS THIS REPOSITORY'S ONE DIVERGENCE FROM THE FLEET.
+      # Every other service's userflow step exports it from QITS_MAVEN_PROXY_URL and resolves Maven
+      # Central through qits-platform-mirror's pull-through cache. THIS repository BUILDS
+      # qits-platform-mirror, so that export breaks this file's own header rule — A MIRROR MUST NOT
+      # BUILD THROUGH ITSELF — and it is not a theoretical breach: this pipeline's env/dev run fires
+      # on the same deploy that recreates the mirror container, so the step lands in the restart
+      # window and every artifact it has not already cached is a connection refused. Measured: green
+      # on env/dev for every run up to 2026-09-01 17:42, and after the export landed, four env/dev
+      # runs red on `Connect to qits-platform-mirror:8080 failed` (three at 20b146f, then 8c0f7f2e
+      # and be9a305) while runs on ordinary branches, which are not adjacent to a mirror deploy,
+      # stayed green. Unset leaves the settings profile inactive and Central is dialled directly,
+      # which is exactly what this step did while it was green.
       ./mvnw -B -ntp -s .qits-maven-settings.xml verify \
         -Dqits.maven.repository.url="$QITS_MAVEN_REPOSITORY_URL" \
         -Dquarkus.quinoa=false \
