@@ -45,8 +45,8 @@
              the test that fails this build when a postgresql datasource is missing a line of that
              block. Published by libs/qits-integrations-quarkus, so they come from the same
              repository as the two above. -->
-        <qits.db-core.version>2026.817.175344</qits.db-core.version>
-        <qits.arch-rules.version>2026.817.175344</qits.arch-rules.version>
+        <qits.db-core.version>2026.902.53026</qits.db-core.version>
+        <qits.arch-rules.version>2026.902.53026</qits.arch-rules.version>
         <!-- Where the two library repositories' jars come from when they are not in ~/.m2 — which
              is every build that is not a developer's. The image build overrides it with the address
              the platform's Maven repository answers on qits-net; see docker/Dockerfile. -->
@@ -90,7 +90,7 @@
              repository, ~350 lines, which that class's javadoc justifies line by line. MockService
              remains the right tool for standing in for another JSON API; a cache's upstream is a
              byte store, which is a different job. -->
-        <qits.userflows.version>2026.829.201516</qits.userflows.version>
+        <qits.userflows.version>2026.902.53027</qits.userflows.version>
 
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
