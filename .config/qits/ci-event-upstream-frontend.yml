@@ -3,10 +3,10 @@
 # nothing until the gitlink in this repository moves. That is what this pipeline does: it fetches
 # the released tag, rewrites the gitlink, and pushes the result to `maintenance/frontend`.
 #
-# THE BRANCH IS AS FAR AS IT GETS HERE. Every sibling platform service carries a
-# ci-event-maintenance-release.yml that releases a maintenance/ push; this repository does not have
-# one yet, so the bump waits on the branch for a hand release. Copying that file in completes the
-# train.
+# THE BRANCH IS AS FAR AS IT GETS HERE, AND THAT IS NOW THE WHOLE JOB. The release is
+# qits-maintenance's ask, made with its own credential the moment the branch is pushed — no
+# sibling carries a per-repo release trigger any more, and the file this comment used to point at
+# is the one that went away.
 #
 # ONE BRANCH, REUSED, force-pushed. Two frontend releases in a row must not leave two branches
 # behind; the second replaces the first, and whatever the first did not release is superseded.
