@@ -1,0 +1,289 @@
+# THE QA PIPELINE — this repository's only per-change pipeline, and it runs for RELEASE REQUESTS
+# ALONE. It replaces ci-event-build.yml and ci-event-userflows.yml, both deleted in the commit that
+# added this file; ci-event-release.yml and ci-event-upstream-frontend.yml are untouched. The
+# reference template with the full argument is qits-ci's docs/ci-event-release-request.yml.
+#
+# Per-push CI is retired platform-wide: nothing builds a branch, because cd deploys what a RELEASE
+# published rather than what a push built. qits-projects keeps, per open release request, a backing
+# branch `release/<id>` — an octopus merge of the request's sources, refolded whenever the set
+# changes — and publishes `ReleaseRequestChanged` on every successful re-fold. That branch is
+# written by qits-githost's merge primitive, which fires no post-receive and therefore publishes no
+# `SCMPublishCommit`: without this event the fold exists and nothing builds it.
+#
+# DECIDE AT MAIN, BUILD AT THE FOLD. The file is discovered, parsed and selected at this
+# repository's `main` head; only the run's branch and sha come from the payload. So a release
+# request cannot alter the CI that gates it by folding in a commit that edits this file.
+#
+# ONE FILE, TWO HALVES, and "a red verify must not cost the image" still holds — bought with
+# ORDERING plus PER-STEP CLASSIFICATION rather than with two files that cannot share a verdict. The
+# gating build is FIRST; the userflow half declares `gating: false`, which still fails the run and
+# shows red but does not hold the fold for qits-projects' build gate. Keep it LAST: everything after
+# a failing step is SKIPPED.
+#
+# THE SHA IMAGE IS GONE. The old build step ended in `docker push
+# $QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-platform-mirror:$QITS_CI_SHA`, the per-push coordinate
+# cd keyed on; a fold's merged sha is not a coordinate anything could deploy. The image is still
+# BUILT here under a local tag — the gate on the fold — and the CalVer coordinate is
+# ci-event-release.yml's, untouched.
+#
+# A MIRROR MUST NOT BUILD THROUGH ITSELF, and that rule survives the rewrite intact in both halves:
+# the image build passes QITS_MAVEN_CENTRAL_URL EMPTY, and the userflow step exports it nowhere.
+# See each step for the measurement.
+#
+# Loop review: this pipeline PUTs a docs bundle and pushes no commit, no tag and no image — nothing
+# the fold is made of changes, so it cannot re-trigger itself. Publish-if-absent: events redeliver
+# and docs versions are immutable, so 409 is success.
+event: ReleaseRequestChanged
+
+when:
+  # repoName, not repoId: since the identity cutover the git host's own coordinate is an opaque
+  # UUID, so a name match belongs on the name. The event echoes the public name; a rename updates
+  # this line in the same campaign. `suppressCi` went with the push event that carried it — a
+  # release request is not a push and `-o qits.no-ci` has nothing to say about one.
+  - repoName: { exact: qits-mirror-platform-service }
+
+checkout:
+  branch: backingBranch
+  sha: mergedSha
+
+steps:
+  # --- the GATING half: build the fold ------------------------------------------------------------
+  # ci-event-build.yml's step, minus the push.
+  - image: qits/build-images/node-docker-base:latest
+    docker: true
+    timeout-seconds: 3600
+    script: |
+      set -eu
+
+      # $QITS_CI_BRANCH is release/<id> and $QITS_CI_SHA is the merged sha — the fold is already
+      # checked out, so nothing here fetches or switches refs.
+      #
+      # --- half one: the bundle -----------------------------------------------------------------
+      # The daemon's clone is shallow and does not recurse, so the qits-mirror-platform-frontend submodule
+      # at src/main/webui arrives as an EMPTY DIRECTORY — and Quinoa fails the image build on exactly
+      # that (`No package.json found in Web UI directory`). `submodule update --init` checks out the
+      # gitlink this repository recorded, so the bundle is built from the client commit this commit
+      # names. Initialising it here rather than asking the daemon to clone differently keeps the
+      # submodule this repo's business: a public GitHub repo needing no credentials, one fetch.
+      #
+      # The url is derived from this run's own repository url rather than read from .gitmodules,
+      # because the sibling lives beside this repository on whichever host CI cloned from.
+      frontend_url="${QITS_CI_REPOSITORY_URL%/*}/qits-mirror-platform-frontend"
+      git -c submodule.qits-mirror-platform-frontend.url="$frontend_url" submodule update --init src/main/webui
+
+      cd src/main/webui
+      # THE LOCKFILE is the one file this step edits, and npm leaves no alternative. npm pins a full
+      # resolved URL per package and qits-mirror-platform-frontend's lockfile is generated on the
+      # deployment host, so every entry names a localhost port that does not exist in this container.
+      # `npm ci` fetches tarballs by those URLs and never asks the configured registry, so the
+      # environment below does not reach them: without this swap the install dies on connection
+      # refused. The paths are identical on every address, so replacing the ORIGIN and keeping the
+      # path is all it takes, and the integrity hashes are what make that safe. The checkout is this
+      # step's own; nothing is edited that anyone will read again.
+      #
+      # THE BYTE PLANE IS TWO SERVICES, WHICH IS WHY THE SWAP READS THE PATH. This service holds the
+      # npmjs pull-through cache; qits-artifacts hosts the @qits scope. No single origin serves both,
+      # so the path tells them apart: an entry under the hosted registry's own pathname
+      # ($QITS_NPM_REGISTRY_URL's) is a @qits tarball and gets the hosted origin, everything else gets
+      # the proxy's. THE ORDER OF THE TWO EXPRESSIONS IS THE TRICK — sed applies -e in sequence per
+      # line, so the broad proxy swap runs FIRST and the narrow path-anchored one corrects the @qits
+      # entries after it. The other order lets the broad expression undo the narrow one.
+      #
+      # npm's own knob for this, `--replace-registry-host=always`, cannot do it against a registry
+      # mounted under a path: @npmcli/arborist glues rather than resolves, so the pathname ends up
+      # doubled and every tarball 404s. Measured on npm 10.9.4.
+      npm_hosted_origin=$(node -p 'new URL(process.env.QITS_NPM_REGISTRY_URL).origin')
+      npm_proxy_origin=$(node -p 'new URL(process.env.QITS_NPM_PROXY_URL).origin')
+      npm_hosted_path=$(node -p 'new URL(process.env.QITS_NPM_REGISTRY_URL).pathname')
+      sed -i -E \
+        -e "s#(\"resolved\": \")https?://[^/\"]+#\1$npm_proxy_origin#" \
+        -e "s#(\"resolved\": \")https?://[^/\"]+($npm_hosted_path)#\1$npm_hosted_origin\2#" \
+        package-lock.json
+
+      # ENVIRONMENT, not a file. qits-mirror-platform-frontend COMMITS an .npmrc
+      # (mirror.dev.localhost:8080 for npmjs and registry.dev.localhost:8080 for @qits, right for a
+      # developer on the host), and npm ranks a project .npmrc ABOVE ~/.npmrc — so a `cat >
+      # ~/.npmrc` preamble would be written and silently ignored. npm_config_* environment outranks
+      # both files, so it wins without touching the submodule tree.
+      env npm_config_registry="$QITS_NPM_PROXY_URL" \
+          "npm_config_@qits:registry=$QITS_NPM_REGISTRY_URL" \
+          npm ci --no-audit --no-fund
+
+      # dist/qits-platform-spa-mirror/browser — the bundle the image build consumes (it is
+      # quarkus.quinoa.build-dir in src/main/resources/application.properties) and the ONE artifact
+      # this half exists to produce. Lint and test are qits-mirror-platform-frontend's own pipeline's job;
+      # repeating them here would only make this repo red for someone else's commit.
+      npm run build
+      cd -
+
+      # --- half two: the image ------------------------------------------------------------------
+      # THE CREDENTIAL IS A SECRET MOUNT AND NEVER A BUILD ARG — an arg is recorded in the image
+      # history. The launcher injects the run's commissioned idp client as
+      # $QITS_COMMISSIONED_CLIENT_ID/$QITS_COMMISSIONED_CLIENT_SECRET; these two flags hand that
+      # pair to the mounts on the Dockerfile's mvnw RUN, which is the only place it exists.
+      # Unconditional on purpose: a missing env source is NOT an error — measured on buildx v0.36.1,
+      # `--secret id=x,env=DOES_NOT_EXIST` builds green and the mounted variable is simply unset —
+      # so these lines do nothing at all until a run carries the pair.
+      # QITS_MAVEN_CENTRAL_URL is passed EMPTY, and stays empty: this repository builds
+      # qits-platform-mirror, so pointing its own image build at the mirror's pull-through cache
+      # would be the mirror built through itself. It was `${QITS_MAVEN_CENTRAL_MIRROR_URL:-}`, the
+      # fleet-wide spelling, which is inert only for as long as nothing injects that variable.
+      # Central is dialled directly instead. Passed rather than dropped so the Dockerfile keeps one
+      # shape across every call site.
+      #
+      # THE TAG IS LOCAL AND NOTHING IS PUSHED. The registry-qualified `:$QITS_CI_SHA` coordinate was
+      # the per-push publication and it is retired with the push path; `docker: true` stays for the
+      # daemon socket the build needs and for the pull auth the mirror-fronted base images need.
+      ref="qits-platform-mirror:$QITS_CI_SHA"
+      docker build --network host \
+        --build-arg QITS_MAVEN_REPOSITORY_URL="http://$QITS_REGISTRY/artifacts/maven/maven" \
+        --build-arg QITS_MAVEN_CENTRAL_URL="" \
+        --secret id=qits-client-id,env=QITS_COMMISSIONED_CLIENT_ID \
+        --secret id=qits-client-secret,env=QITS_COMMISSIONED_CLIENT_SECRET \
+        -t "$ref" -f docker/Dockerfile .
+      # NO `docker rmi "$ref"`: on a CI host it frees nothing — the layers stay in the builder's
+      # cache either way — while under the containerd image store it drops the last reference to
+      # content a concurrent build of this same Dockerfile may still be resolving.
+
+  # --- the NON-GATING half: verify the stories, and publish what the run observed -----------------
+  # ci-event-userflows.yml's step, unchanged but for `gating: false`, which is the whole of what that
+  # separate file was.
+  #
+  # `mvn verify` at the fold — which regenerates target/userstories/ through the story catalogue in
+  # src/test/java/.../mirror/stories/ — and the reports published as one docs bundle, site
+  # @userflows/qits-mirror-platform-service, version = the merged sha, branch riding as artifacts
+  # metadata for discovery.
+  #
+  # ONE STEP, BECAUSE STEPS SHARE NOTHING. Every step container clones the repository for itself, so
+  # the gating step above cannot hand this one anything: the verify and the publish stay together.
+  #
+  # WHAT THE STORIES ARE. Thirteen of them over seven classes, all against ONE launched artifact (one
+  # @TestProfile, so one mirror and one cache), and all arranged around a single negative: a cache's
+  # central claim is not about a response, it is about a request that was NEVER MADE. So the warm story
+  # on each of the three planes ends in assertNoEdgesTo(<the registry>) — a hit that quietly dialled
+  # upstream would pass every other test in this repository and would cost money on every CI run.
+  #
+  #   caching     the npm cold miss, counted on the UPSTREAM's end, and then the warm read that
+  #               reaches nobody at all
+  #   npm         the same pair driven by the REAL npm CLI, which follows the rewritten dist.tarball
+  #               (not a config key — only a real client on a real port can show it is right) and
+  #               verifies upstream's integrity against the bytes this cache served
+  #   maven       the JVM plane: upstream's own .sha1 cached vs the metadata .sha1 derived, five reads
+  #               for four fetches, then a resolve that never leaves the process
+  #   oci         the container plane: a manifest byte-for-byte with the digest a client verifies,
+  #               blobs verified as they stream, then a pull that reaches no registry
+  #   outage      the registry goes DARK mid-story: what is cached keeps installing, what was never
+  #               cached is a 502 that names it, and past the packument TTL the STALE document is
+  #               served — proved by polling until a read that used to cost the registry nothing
+  #               starts costing it a dropped dial
+  #   refusals    a no is passed through and REMEMBERED NOWHERE (the second ask reaches upstream too),
+  #               and an upstream that cannot answer is a 502 and never a 404 — the distinction this
+  #               service is the worst place on the platform to lose, since a wrong "there is no such
+  #               thing" is cached by every npm, maven and docker client that asked
+  #   operations  the explorer's read-only inventory, and that reading it dials NONE of the three
+  #
+  # THE FAR SIDE IS THREE RECORDING STAND-INS, one per plane, each NAMED AFTER THE ADDRESS A DEPLOYMENT
+  # REALLY DIALS — registry.npmjs.org, repo1.maven.org, quay.io — so the network diagrams carry the
+  # dependency the shipped configuration declares rather than a fixture's alias. All three are
+  # stories/support/RecordingUpstream, a test-only class in this repository: it serves BINARY bodies (a
+  # real gzipped USTAR tarball, a jar, an OCI layer), can be armed FROM A STORY METHOD (the outage
+  # story), can decline to answer at all (an outage is a dropped connection, not a 500), and records
+  # the STATUS it answered with.
+  #
+  # Every upstream key is moved, so nothing reaches the real internet from a step container: a key left
+  # at its shipped value would let a mistyped path pass or fail for reasons unrelated to this code. A
+  # MIRROR MUST NOT BUILD THROUGH ITSELF still holds here as everywhere: the Maven repository this step
+  # reads is qits-artifacts', never this deployment's.
+  #
+  # NPM IS THE ONE REAL CLI, and that is a decision rather than a gap. maven is not driven by the real
+  # launcher because it would be a second Maven JVM inside a build that already has one plus a failsafe
+  # fork, a launched artifact and an embedded postgres; the OCI plane is not driven by `docker pull`
+  # because a pull is executed by a DAEMON, which resolves the loopback address in another network
+  # namespace and demands TLS or an insecure-registries entry, and skopeo is not in this image. Both
+  # planes are driven on the wire instead, which keeps every claim that is about THIS service. The npm
+  # stories skip themselves (@EnabledIf) on a machine with no npm — maven-base has one.
+  #
+  # `user: build`, and NOT a switch inside the script. This repository's suite spawns a REAL postgres —
+  # zonky binaries resolved as ordinary Maven artifacts and run as a child process, never a container —
+  # and PullThroughBootstrapIT hands the launched artifact one of its own through the platform's
+  # generic resource triple, because this service's whole state is a database. initdb refuses to run as
+  # root and calls getpwuid, so the step needs a passwd-backed non-root user: maven-base carries one
+  # (uid 1001), with cap-drop=ALL and no su to undo it, which nothing here wants. The step containers
+  # are Alpine (musl), which is why pom.xml names zonky's -alpine binaries as a FOURTH arch;
+  # without that entry this run resolves green and dies mid-suite on a missing artifact.
+  #
+  # Quinoa is off (`-Dquarkus.quinoa=false` — the extension's root toggle; `.enabled` is silently
+  # ignored and npm still runs): the explorer client is the gating step's business, where the
+  # qits-mirror-platform-frontend submodule is initialised and its lockfile origins are swapped against the
+  # platform's two npm services, and none of that ritual belongs here — the stories assert nothing
+  # about the SPA. It is also what keeps this step from needing the submodule at all: the daemon's
+  # clone does not recurse, so src/main/webui arrives EMPTY, and an empty directory is the one case
+  # Quinoa treats as a misconfiguration rather than as "no client".
+  #
+  # THE TWO IT FLAGS ARE THE OTHER HALF, and they are why this repository does NOT opt its ITs back in
+  # from the pom the way qits-docs does. `skipITs` is true in pom.xml and stays true, for two reasons
+  # either of which would settle it:
+  #
+  #   1. THE README OWES A PACKAGED-SURFACE PROBE, and half of it is about the CLIENT — `/` answering
+  #      200 HTML with <base href="/">, a deep link falling back to index.html, and /v2,
+  #      /artifacts/npm and /artifacts/maven staying 404s now that the root-path flip put all three
+  #      inside the SPA fallback's reach. The line below deliberately builds no client, so a blanket
+  #      -DskipITs=false would make this run red on that test the day it lands.
+  #   2. THE SUREFIRE SUITE ALREADY SPAWNS A POSTGRES. Opting a plain `mvn verify` into a second one
+  #      plus a launched process would change the clone-alone build the README documents, for
+  #      everybody, to run what this pipeline runs anyway.
+  #
+  # EVERY STORY CLASS IS LISTED BELOW and a new one must be added here in the same commit — an
+  # unlisted class is silently never run, and its stories simply never appear in the bundle.
+  #
+  # TIMEOUT. Longer than the fleet's usual 2400: this suite restarts Quarkus once per @TestProfile
+  # across the npm, maven, OCI and eviction classes against a real postgres, and `verify` then packages
+  # the fast-jar and launches it once for the whole catalogue. The catalogue itself is fast — around
+  # 45 seconds, of which 30 is the outage story waiting out the packument TTL, which is the one thing
+  # here that costs wall clock rather than work. 3600 is headroom, not an expectation.
+  - image: qits/build-images/maven-base:latest
+    user: build
+    gating: false
+    timeout-seconds: 3600
+    script: |
+      set -eu
+      # The platform registry, exactly as qits-eventstream's step derives it: the pom's default
+      # names a host-published address unreachable from a step container, and the exact-id mirror
+      # in .qits-maven-settings.xml is what passes Maven's HTTP blocker.
+      export QITS_MAVEN_REPOSITORY_URL="$QITS_MAVEN_REGISTRY_URL"
+      # NO QITS_MAVEN_CENTRAL_URL HERE, AND THAT IS THIS REPOSITORY'S ONE DIVERGENCE FROM THE FLEET.
+      # Every other service's userflow step exports it from QITS_MAVEN_PROXY_URL and resolves Maven
+      # Central through qits-platform-mirror's pull-through cache. THIS repository BUILDS
+      # qits-platform-mirror, so that export breaks this file's own header rule — A MIRROR MUST NOT
+      # BUILD THROUGH ITSELF. It was measured as well as argued: while this pipeline still ran per
+      # push, its env/dev run fired on the same deploy that recreated the mirror container, so the
+      # step landed in the restart window and every artifact it had not already cached was a
+      # connection refused — green on env/dev for every run up to 2026-09-01 17:42, then four red on
+      # `Connect to qits-platform-mirror:8080 failed` (three at 20b146f, then 8c0f7f2e and be9a305)
+      # while runs on ordinary branches stayed green. A QA run deploys nothing now, so that
+      # particular adjacency is gone — and the rule is not, because it never depended on it. Unset
+      # leaves the settings profile inactive and Central is dialled directly.
+      ./mvnw -B -ntp -s .qits-maven-settings.xml verify \
+        -Dqits.maven.repository.url="$QITS_MAVEN_REPOSITORY_URL" \
+        -Dquarkus.quinoa=false \
+        -DskipITs=false \
+        "-Dit.test=PullThroughBootstrapIT,MavenPullThroughIT,NpmInstallThroughTheMirrorIT,ImagePullThroughIT,CacheInventoryIT,StaleThroughAnOutageIT,UpstreamRefusalIT"
+
+      # `-C … .` so the story directories are the bundle's roots — nesting one directory deep would
+      # put it in every served URL. SINGLE-MODULE repository, so the path is target/userstories and
+      # not the service/target/… most siblings' files name.
+      tar -czf userstories.tgz -C target/userstories .
+
+      # Branch and commit ride as metadata (the docs store's exact-match discovery keys); the
+      # version is the merged sha itself, so a bundle URL never changes meaning.
+      status=$(curl -sS -o /tmp/docs-publish.out -w '%{http_code}' \
+        -X PUT --data-binary @userstories.tgz \
+        -H "X-Artifacts-Meta-git.branch.name: $QITS_CI_BRANCH" \
+        -H "X-Artifacts-Meta-git.commit.hash: $QITS_CI_SHA" \
+        -H "X-Artifacts-Meta-git.repository.name: qits-mirror-platform-service" \
+        "$QITS_DOCS_URL/@userflows/qits-mirror-platform-service/-/$QITS_CI_SHA")
+      case "$status" in
+        201) echo "published userflows for qits-mirror-platform-service@$QITS_CI_SHA ($QITS_CI_BRANCH)" ;;
+        409) echo "userflows for qits-mirror-platform-service@$QITS_CI_SHA already published — skipping" ;;
+        *)   echo "docs publish failed: HTTP $status"; cat /tmp/docs-publish.out; exit 1 ;;
+      esac
