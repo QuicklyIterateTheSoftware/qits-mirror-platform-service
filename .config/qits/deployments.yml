@@ -1,9 +1,9 @@
 # How qits-deployments deploys this repo. It reads this file from the git host at the built sha, so
 # the answer travels with the commit.
 #
-# CARRYING THE FILE AT ALL is the other thing it says. qits-workspaces reads it on a release to
-# decide whether this repository deploys — a library or an SPA carries none and its release is the
-# trunk push alone.
+# CARRYING THE FILE AT ALL is the other thing it says. The release flow reads it to decide whether
+# this repository deploys — a library or an SPA carries none, and its `main` is finalized at the
+# release itself rather than after a deployment.
 #
 # PLATFORM service, and the only byte service that stays one. Everything here is a cache of somebody
 # else's bytes: npmjs, Maven Central, Docker Hub. A copy per environment would be several caches

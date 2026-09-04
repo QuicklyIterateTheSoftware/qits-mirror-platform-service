@@ -213,10 +213,11 @@ Three classes pin `@TestMethodOrder`, and in each it is load-bearing rather than
 attributed by a cursor, so the cold story's fetches belong on the cold story's diagram
 and the warm story's empty slice is what the negative reads.
 
-**`skipITs` is true and stays true.** `.config/qits/ci-event-userflows.yml` names every
-story class — `-DskipITs=false "-Dit.test=…"`, with `-Dquarkus.quinoa=false` — and
-publishes `target/userstories/` as the docs bundle `@userflows/qits-platform-mirror`,
-non-gating, one per commit. Default-on would drag the packaged-surface probe below into
+**`skipITs` is true and stays true.** The second step of
+`.config/qits/ci-event-release-request.yml` names every story class —
+`-DskipITs=false "-Dit.test=…"`, with `-Dquarkus.quinoa=false` — and publishes
+`target/userstories/` as the docs bundle `@userflows/qits-platform-mirror`. It declares
+`gating: false`, and it runs once per release-request fold rather than per commit. Default-on would drag the packaged-surface probe below into
 a client-less run the day it lands, and would make a plain `verify` spawn a second
 postgres for what CI runs anyway. `-Dnative` flips the property, so a native build runs
 the catalogue against the binary.
@@ -245,10 +246,12 @@ fallback by the image pull.
 
 ## Deployment
 
-**How it ships.** A push builds `docker/Dockerfile` — a Mandrel builder stage that native-compiles
-this module, a `ubi-minimal` runtime stage that carries only the binary — and pushes it as
-`qits/qits-platform-mirror:<sha>`; a release rebuilds the same content under the released version
-(`.config/qits/ci-post-receive.yml` and `.config/qits/ci-event-release.yml`). Both builds run
+**How it ships.** A release builds `docker/Dockerfile` — a Mandrel builder stage that
+native-compiles this module, a `ubi-minimal` runtime stage that carries only the binary — and pushes
+it as `qits/qits-platform-mirror:<version>` (`.config/qits/ci-event-release.yml`). **Nothing builds
+a push any more**: per-push CI is retired platform-wide, and the other pipeline,
+`.config/qits/ci-event-release-request.yml`, runs the same build — minus the push — against a
+release request's fold, `release/<id>`, as the gating half of the QA gate. Both builds run
 `--network host` with `--build-arg QITS_MAVEN_REPOSITORY_URL=…`, because `qits-blobstore` and
 the three `qits-registries` jars exist only in the platform's own Maven repository and a docker
 build reaches no other address for them — host networking rather than a custom one because buildkit
