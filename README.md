@@ -6,7 +6,8 @@ application.
 One deployable Quarkus application over one library repository, `qits-registries-javalib` —
 `qits-blobstore` (the content-addressed store) and the `qits-registries-*` jars (the npm, maven
 and OCI wire protocols). This repository holds what a library cannot: configuration, a schema,
-a seeder, and the explorer — a read-only admin API at `/mirror/api` with the
+a seeder, and the explorer — an admin API at `/mirror/api` (two listings, a
+drill-down, and one guarded invalidate door) with the
 Angular client that draws it, served at `/` on this service's own host,
 `mirror.<env>.<domain>`. That is the same authority dockerd, npm and maven already
 dial: the edge picks the gate per request, so the browser plane and the machine
@@ -33,14 +34,26 @@ exist.
 ## The explorer
 
 What a cache holds is decided by what somebody pulled, and what it drops is decided by
-a window and a clock. So the surface that shows it is **read-only, whole**: two GETs,
-no create, no delete, and no "evict now" button — a page that could delete a cached tag
+a window and a clock. So the surface that shows it is **read-only but for one route**:
+no create, no publish, and no "clear the cache" — a page that decided what to keep
 would be a second eviction policy with no record of why it ran.
+
+The exception is the **invalidate door**, and it is a repair rather than a policy.
+On 2026-09-05 a cached `quarkus-proxy-registry-3.34.6.pom` answered `500` to every
+request for four days — the bytes were fine and upstream was fine, the row had gone
+bad — and nothing on this service could clear it: the `maven-proxy` window is `P90D`,
+the entry was cached on 2026-09-01, and the sweep is a clock and not a hand. Meanwhile
+it blocked release gates across the platform. **A cache with no way to drop one entry
+is a cache whose faults are permanent.** The door takes one entry by its exact path,
+refuses anything that is not a pull-through, touches no blob, and what it removes comes
+back on the very next request — which is the whole difference from a collection.
 
 | Path | Answers |
 |---|---|
 | `GET /mirror/api/repositories` | `{"repositories":[{name, type, upstream, createdAt}]}` — every cache root and what it fronts |
 | `GET /mirror/api/upstreams` | `{"upstreams":[{host, namespace, cachedImages, createdAt}]}` — every mirrored registry |
+| `GET /mirror/api/repositories/{repository}/packages` | what one root holds, folded into coordinates |
+| `DELETE /mirror/api/repositories/{repository}/entries?path=…` | evicts one cached entry; `{repository, path, kind, rowsRemoved}`. **The only guarded route here** — `qits:admin` or `qits:system`. `404` if nothing was cached there, `409` if the root is not a maven pull-through |
 | `/` on `mirror.<env>.<domain>` | the Angular client (`src/main/webui`, the `qits-mirror-platform-frontend` submodule), built and served by Quinoa |
 
 `name` and `type` on a repository and `host` on an upstream are the fields the client
@@ -293,8 +306,25 @@ than a page.
 
 ## Not here yet
 
-Nothing this repository has deferred. The admin API and the explorer UI were the
-open phase-2 work package in `byte-plane-split-plan.md`; both are above.
+The admin API and the explorer UI were the open phase-2 work package in
+`byte-plane-split-plan.md`; both are above.
+
+**The invalidate door evicts maven-proxy entries only, and that is deliberate rather
+than half-done.** npm and OCI are caches too and will want the same repair, but an npm
+entry is a package *and* a version and an OCI entry is an image *and* either a tag or a
+digest — neither is a `path`, so each needs a parameter of its own and a test that
+proves the eviction reached the right one of two tables. Guessing those spellings before
+anything needs them would be worse than the `409` the door answers today, which names
+the type instead of pretending the entry is missing.
+
+**The read path does not yet heal itself**, and that half does not live here: the
+maven wire is `qits-registries-javalib`'s (`MavenRoutes`, `MavenUpstream`,
+`MavenRegistryService`), consumed as a pinned jar. A cached entry whose serving fails on
+a storage-side fault should evict itself and refetch inside the request rather than
+waiting for a hand on this door — together with an upsert in `recordProxiedArtifact`,
+whose check-then-insert is the race that produced the 2026-09-05 fault in the first
+place. Both are that repository's to make, and arrive here as a
+`qits.registries.version` bump.
 
 What is still ahead is not this service's to do alone: the **cutover**, which splits
 the client configuration (npm scoped registries, dockerd `registry-mirrors`, the maven
