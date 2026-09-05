@@ -20,13 +20,17 @@
          schema, a seeder, and now the explorer surface: a read-only admin API at /mirror/api and the
          Angular client Quinoa serves at /mirror/. A parent pom over one child would be ceremony.
 
-         No qits-auth-core: nothing publishes to this service, so it needs no machine-token
-         enforcement, and a cache that authenticated its readers would be a cache nothing could
-         read. Pulls are anonymous on qits-net, exactly as they are today — and the admin API adds
-         nothing to defend, because it has no write. -->
+         qits-auth-core arrives with the admin API's FIRST WRITE and changes nothing about the
+         pulls. Nothing publishes to this service, so it still enforces no machine token on the wire,
+         and a cache that authenticated its readers would be a cache nothing could read: pulls are
+         anonymous on qits-net exactly as they were. What is guarded is one route — the invalidate
+         door, DELETE /mirror/api/repositories/{repository}/entries — because an operator evicting a
+         cached entry is a write, and the sentence that used to stand here ("the admin API adds
+         nothing to defend, because it has no write") stopped being true the day that route landed.
+         See the qits.auth-core.version property below. -->
     <groupId>eu.wohlben.qits</groupId>
     <artifactId>qits-platform-mirror</artifactId>
-    <version>2026.905.102340</version>
+    <version>2026.905.122903</version>
     <packaging>quarkus</packaging>
     <name>qits-platform-mirror</name>
 
@@ -47,6 +51,23 @@
              repository as the two above. -->
         <qits.db-core.version>2026.904.82648</qits.db-core.version>
         <qits.arch-rules.version>2026.904.82648</qits.arch-rules.version>
+        <!-- The forward-auth mechanism, and the reason this service has one at all now: the admin
+             API grew its FIRST WRITE. Until the invalidate door landed the pom above could say "no
+             qits-auth-core: the admin API adds nothing to defend, because it has no write", and that
+             sentence was true. A route that deletes a cached entry is a different thing, so it takes
+             the platform's operator-door idiom — X-Qits-User / X-Qits-Roles from qits-gateway turned
+             into an identity, @RolesAllowed making the decision — rather than a header check written
+             here.
+
+             THE PULLS STAY ANONYMOUS, which is the property this must not cost. Nothing is added to
+             quarkus.http.auth.permission.*, so no path policy exists; the three wire protocols are
+             raw Vert.x routes that no security annotation can reach, and the two listings keep no
+             annotation of their own. Only the DELETE is guarded. A cache that authenticated its
+             readers would be a cache nothing could read, and that is still true.
+
+             Same pin as qits-db-core and qits-arch-rules above — one release of
+             libs/qits-integrations-quarkus publishes all three, and the three move together. -->
+        <qits.auth-core.version>2026.904.82648</qits.auth-core.version>
         <!-- Where the two library repositories' jars come from when they are not in ~/.m2 — which
              is every build that is not a developer's. The image build overrides it with the address
              the platform's Maven repository answers on qits-net; see docker/Dockerfile. -->
@@ -273,6 +294,30 @@
             <groupId>${project.groupId}</groupId>
             <artifactId>qits-db-core</artifactId>
             <version>${qits.db-core.version}</version>
+        </dependency>
+        <dependency>
+            <!-- ForwardAuthMechanism, and with it quarkus-security. See the property above for why
+                 this service has an identity now and for what it deliberately does not change. -->
+            <groupId>${project.groupId}</groupId>
+            <artifactId>qits-auth-core</artifactId>
+            <version>${qits.auth-core.version}</version>
+        </dependency>
+        <dependency>
+            <!-- The MACHINE half of the operator-door idiom, and it does NOT arrive with
+                 qits-auth-core — that jar carries the forward-auth mechanism and quarkus-security,
+                 and nothing else. Declared here for the same reason qits-platform-maintenance and
+                 qits-githost declare it: without the extension the quarkus.oidc.* block in
+                 application.properties is not configuration, it is seven unrecognized keys warned
+                 about on every boot, and a bearer minted for this service would be ignored rather
+                 than validated.
+
+                 It costs this deployment nothing while the rollout gate is off:
+                 quarkus.oidc.tenant-enabled follows qits.auth.machine.required, which defaults
+                 false, so no tenant is built, no JWKS is fetched and nothing waits on
+                 qits-platform-idp. qits-githost is the precedent that matters for the packaging —
+                 it is a GraalVM native image and carries this same pair. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-oidc</artifactId>
         </dependency>
         <dependency>
             <groupId>io.quarkus</groupId>
