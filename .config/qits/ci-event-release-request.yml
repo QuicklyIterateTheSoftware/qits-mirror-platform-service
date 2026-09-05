@@ -23,8 +23,8 @@
 # THE SHA IMAGE IS GONE. The old build step ended in `docker push
 # $QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-platform-mirror:$QITS_CI_SHA`, the per-push coordinate
 # cd keyed on; a fold's merged sha is not a coordinate anything could deploy. The image is still
-# BUILT here under a local tag — the gate on the fold — and the CalVer coordinate is
-# ci-event-release.yml's, untouched.
+# BUILT here and nothing is published — the build IS the gate on the fold — and the CalVer
+# coordinate is ci-event-release.yml's.
 #
 # A MIRROR MUST NOT BUILD THROUGH ITSELF, and that rule survives the rewrite intact in both halves:
 # the image build passes QITS_MAVEN_CENTRAL_URL EMPTY, and the userflow step exports it nowhere.
@@ -50,7 +50,7 @@ steps:
   # --- the GATING half: build the fold ------------------------------------------------------------
   # ci-event-build.yml's step, minus the push.
   - image: qits/build-images/node-docker-base:latest
-    docker: true
+    build: true
     timeout-seconds: 3600
     script: |
       set -eu
@@ -117,33 +117,58 @@ steps:
       cd -
 
       # --- half two: the image ------------------------------------------------------------------
-      # THE CREDENTIAL IS A SECRET MOUNT AND NEVER A BUILD ARG — an arg is recorded in the image
-      # history. The launcher injects the run's commissioned idp client as
-      # $QITS_COMMISSIONED_CLIENT_ID/$QITS_COMMISSIONED_CLIENT_SECRET; these two flags hand that
-      # pair to the mounts on the Dockerfile's mvnw RUN, which is the only place it exists.
-      # Unconditional on purpose: a missing env source is NOT an error — measured on buildx v0.36.1,
-      # `--secret id=x,env=DOES_NOT_EXIST` builds green and the mounted variable is simply unset —
-      # so these lines do nothing at all until a run carries the pair.
-      # QITS_MAVEN_CENTRAL_URL is passed EMPTY, and stays empty: this repository builds
-      # qits-platform-mirror, so pointing its own image build at the mirror's pull-through cache
-      # would be the mirror built through itself. It was `${QITS_MAVEN_CENTRAL_MIRROR_URL:-}`, the
-      # fleet-wide spelling, which is inert only for as long as nothing injects that variable.
-      # Central is dialled directly instead. Passed rather than dropped so the Dockerfile keeps one
-      # shape across every call site.
+      # THE IMAGE IS BUILT ON THE PLATFORM'S OWN BUILDKITD, NOT ON THE HOST DOCKER DAEMON.
+      # `build: true` is what says so: it is the per-step, diff-visible declaration that gets this
+      # step the builder's address and the run's commissioned credential, and — unlike the
+      # `docker: true` it replaces — it gets no docker socket, because nothing below wants one.
+      # qits-buildkit-plan.md in the wrapper is the whole migration; qits-workspace-daemon's
+      # .config/qits/ci-event-*.yml are the converted reference pair and carry the long argument.
       #
-      # THE TAG IS LOCAL AND NOTHING IS PUSHED. The registry-qualified `:$QITS_CI_SHA` coordinate was
-      # the per-push publication and it is retired with the push path; `docker: true` stays for the
-      # daemon socket the build needs and for the pull auth the mirror-fronted base images need.
-      ref="qits-platform-mirror:$QITS_CI_SHA"
-      docker build --network host \
-        --build-arg QITS_MAVEN_REPOSITORY_URL="http://$QITS_REGISTRY/artifacts/maven/maven" \
-        --build-arg QITS_MAVEN_CENTRAL_URL="" \
-        --secret id=qits-client-id,env=QITS_COMMISSIONED_CLIENT_ID \
-        --secret id=qits-client-secret,env=QITS_COMMISSIONED_CLIENT_SECRET \
-        -t "$ref" -f docker/Dockerfile .
-      # NO `docker rmi "$ref"`: on a CI host it frees nothing — the layers stay in the builder's
-      # cache either way — while under the containerd image store it drops the last reference to
-      # content a concurrent build of this same Dockerfile may still be resolving.
+      # The builder is demanded LOUDLY before anything is built. Unset means a qits-ci/qits-containers
+      # pair too old to inject it; EMPTY means the kill switch (qits.ci.buildkit.enabled=false spells
+      # off as empty-never-absent). Either way this step must stop here, naming the cause.
+      : "${BUILDKIT_HOST:?the platform builder is off or not injected; this recipe builds only through it}"
+
+      # THE CREDENTIAL IS A SECRET IN FILE FORM ON BOTH SIDES, and never a build arg — an arg is
+      # recorded in the image history. Written under umask 077 into /tmp, which is outside the clone,
+      # so neither file can enter the build context; buildctl takes them as `src=` and the
+      # Dockerfile's mvnw RUN mounts them as bare files under /run/secrets and reads them itself. The
+      # `env=` mount form both sides used to use is gone: it needs a dockerfile frontend the BUILDER
+      # picks, so a recipe using it is coupled to the builder's version. The launcher injects the
+      # run's commissioned idp client as
+      # $QITS_COMMISSIONED_CLIENT_ID/$QITS_COMMISSIONED_CLIENT_SECRET; `${…:-}` keeps the old
+      # property that a run carrying no pair is not an error, which `set -u` would otherwise turn
+      # into a failed step.
+      umask 077
+      printf '%s' "${QITS_COMMISSIONED_CLIENT_ID:-}" > /tmp/qits-client-id
+      printf '%s' "${QITS_COMMISSIONED_CLIENT_SECRET:-}" > /tmp/qits-client-secret
+
+      # NO --network host, AND NOTHING REPLACES IT. Every `RUN` executes in the builder's own network
+      # namespace on qits-net, so the Maven repository this build reads is dialled by its IN-NETWORK
+      # address, $QITS_MAVEN_REGISTRY_URL — qits-artifacts, a DIFFERENT service from the one this
+      # repository builds, which is the whole point below. The host-published spelling the old
+      # --network host reached does not resolve from the builder, by design.
+      #
+      # QITS_MAVEN_CENTRAL_URL IS PASSED EMPTY, AND STAYS EMPTY. This is the one line the migration
+      # must not touch: this repository builds qits-platform-mirror, so pointing its own image build
+      # at the mirror's pull-through cache would be the mirror built through itself — and that is as
+      # true of the in-network $QITS_MAVEN_PROXY_URL every sibling recipe now passes as it was of the
+      # `${QITS_MAVEN_CENTRAL_MIRROR_URL:-}` edge spelling this replaced. Central is dialled
+      # directly. Passed rather than dropped so the Dockerfile keeps one shape across every call
+      # site.
+      #
+      # NOTHING IS PUBLISHED, SO THERE IS NO `--output` AT ALL. The registry-qualified `:$QITS_CI_SHA`
+      # coordinate was the per-push publication and it is retired with the push path; the build stays
+      # because it is the gate, and buildctl solves the whole graph and exports nothing. That is all
+      # the local `-t qits-platform-mirror:$QITS_CI_SHA` tag ever meant. There is no local image store
+      # in the path any more, which also retires the old rmi note: two concurrent builds of this
+      # Dockerfile share the builder's content-addressed, refcounted cache.
+      buildctl build --frontend dockerfile.v0 \
+        --local context=. --local dockerfile=docker \
+        --opt build-arg:QITS_MAVEN_REPOSITORY_URL="$QITS_MAVEN_REGISTRY_URL" \
+        --opt build-arg:QITS_MAVEN_CENTRAL_URL="" \
+        --secret id=qits-client-id,src=/tmp/qits-client-id \
+        --secret id=qits-client-secret,src=/tmp/qits-client-secret
 
   # --- the NON-GATING half: verify the stories, and publish what the run observed -----------------
   # ci-event-userflows.yml's step, unchanged but for `gating: false`, which is the whole of what that

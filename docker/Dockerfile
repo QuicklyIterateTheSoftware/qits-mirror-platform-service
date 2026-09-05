@@ -155,11 +155,18 @@ ENV QITS_MAVEN_CENTRAL_URL=$QITS_MAVEN_CENTRAL_URL
 # is pullable, and a build arg is recorded where anyone who pulls it can read it.
 # `.qits-maven-settings.xml` reads the two variables as the `qits-maven-network` server.
 #
-# Absent secrets leave both variables unset, which is the state every build is in today and the
+# Absent secrets leave both variables empty, which is the state every build is in today and the
 # state a host-side `docker build` is in permanently: Maven sends credentials only when a repository
 # answers 401, and the registry does not yet.
-RUN --mount=type=secret,id=qits-client-id,env=QITS_MAVEN_AUTH_USR \
-    --mount=type=secret,id=qits-client-secret,env=QITS_MAVEN_AUTH_PSW \
+#
+# FILE FORM (`/run/secrets/<id>`, read into the command's own environment below), never the `env=`
+# mount form these two lines used to carry. `env=` needs a dockerfile frontend the BUILDER chooses,
+# and since the builds moved to the platform's buildkitd the frontend is the builder's to pick, not
+# this file's; the bare file mount is served identically by every frontend version.
+RUN --mount=type=secret,id=qits-client-id \
+    --mount=type=secret,id=qits-client-secret \
+    export QITS_MAVEN_AUTH_USR="$(cat /run/secrets/qits-client-id 2>/dev/null || true)"; \
+    export QITS_MAVEN_AUTH_PSW="$(cat /run/secrets/qits-client-secret 2>/dev/null || true)"; \
     d=src/main/webui/dist/qits-platform-spa-mirror/browser; \
     test -f "$d/index.html" || { \
       echo "No built client at $d." >&2; \
