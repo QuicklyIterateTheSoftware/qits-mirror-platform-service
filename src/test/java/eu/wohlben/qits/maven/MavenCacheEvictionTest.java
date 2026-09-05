@@ -234,7 +234,7 @@ class MavenCacheEvictionTest {
         .delete(DOOR, "hub")
         .then()
         .statusCode(409)
-        .body(containsString("oci-mirror"));
+        .body(containsString("an oci-mirror"));
   }
 
   @Test

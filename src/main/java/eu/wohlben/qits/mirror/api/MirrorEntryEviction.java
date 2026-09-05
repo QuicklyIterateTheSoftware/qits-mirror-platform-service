@@ -117,8 +117,8 @@ public class MirrorEntryEviction {
         Response.Status.CONFLICT,
         "'"
             + repository.name
-            + "' is a "
-            + RepositoryTypeProfile.wireNameOf(repository.type)
+            + "' is "
+            + article(RepositoryTypeProfile.wireNameOf(repository.type))
             + " cache, and this door only evicts maven-proxy entries so far — an npm or OCI entry is"
             + " not spelled by a path and needs a parameter of its own");
   }
@@ -178,6 +178,18 @@ public class MirrorEntryEviction {
           evicted.kind(), evicted.path(), evicted.repository());
     }
     return evicted;
+  }
+
+  /**
+   * "a" or "an" in front of a type's wire name — {@code an oci-mirror}, {@code a maven-proxy}. A
+   * refusal is read by a person, and a message that has to be forgiven its grammar to be believed is
+   * a worse message.
+   */
+  private static String article(String wireName) {
+    return (wireName != null && "aeiou".indexOf(Character.toLowerCase(wireName.charAt(0))) >= 0
+            ? "an "
+            : "a ")
+        + wireName;
   }
 
   /**
