@@ -265,10 +265,11 @@ it as `qits/qits-platform-mirror:<version>` (`.config/qits/ci-event-release.yml`
 a push any more**: per-push CI is retired platform-wide, and the other pipeline,
 `.config/qits/ci-event-release-request.yml`, runs the same build — minus the push — against a
 release request's fold, `release/<id>`, as the gating half of the QA gate. Both builds run
-`--network host` with `--build-arg QITS_MAVEN_REPOSITORY_URL=…`, because `qits-blobstore` and
-the three `qits-registries` jars exist only in the platform's own Maven repository and a docker
-build reaches no other address for them — host networking rather than a custom one because buildkit
-refuses custom networks.
+through the PLATFORM BUILDER (`build: true` + buildctl — the wrapper's qits-buildkit-plan.md) with
+`--opt build-arg:QITS_MAVEN_REPOSITORY_URL=$QITS_MAVEN_REGISTRY_URL`, because `qits-blobstore` and
+the three `qits-registries` jars exist only in the platform's own Maven repository; a RUN executes
+on the platform network now, so the in-network address is the one that resolves. The old
+`--network host` doctrine retired with the host-daemon build.
 
 **Both pipelines build the client before the image.** The step container sits on `qits-net`, where
 the platform's npm registry answers; a docker `RUN` reaches that registry by no address at all, so
