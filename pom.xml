@@ -49,8 +49,8 @@
              the test that fails this build when a postgresql datasource is missing a line of that
              block. Published by libs/qits-integrations-quarkus, so they come from the same
              repository as the two above. -->
-        <qits.db-core.version>2026.905.91442</qits.db-core.version>
-        <qits.arch-rules.version>2026.905.91442</qits.arch-rules.version>
+        <qits.db-core.version>2026.906.171046</qits.db-core.version>
+        <qits.arch-rules.version>2026.906.171046</qits.arch-rules.version>
         <!-- The forward-auth mechanism, and the reason this service has one at all now: the admin
              API grew its FIRST WRITE. Until the invalidate door landed the pom above could say "no
              qits-auth-core: the admin API adds nothing to defend, because it has no write", and that
@@ -67,7 +67,7 @@
 
              Same pin as qits-db-core and qits-arch-rules above — one release of
              libs/qits-integrations-quarkus publishes all three, and the three move together. -->
-        <qits.auth-core.version>2026.905.91442</qits.auth-core.version>
+        <qits.auth-core.version>2026.906.171046</qits.auth-core.version>
         <!-- Where the two library repositories' jars come from when they are not in ~/.m2 — which
              is every build that is not a developer's. The image build overrides it with the address
              the platform's Maven repository answers on qits-net; see docker/Dockerfile. -->
