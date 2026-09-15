@@ -16,9 +16,10 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * The receive-only default of contract C4: every token now carries {@code qits-platform}, so a
- * caller addressed only to that shared audience must still pass this service's OIDC check, even
- * though the check still names this service's own id too.
+ * The audience this service answers to is the platform's one machine audience, {@code
+ * qits-platform}: qits-platform-idp puts it on every token it mints, so a caller addressed to it —
+ * which is every caller there is — passes this service's OIDC check, and a token from anywhere else
+ * does not.
  *
  * <p>This is the first test in the repository that turns the machine gate ON. The README says the
  * rollout gate stays off in normal operation, so no in-repo pattern exists to follow for a real
@@ -90,7 +91,7 @@ class MachinePlatformAudienceTest {
   }
 
   @Test
-  void aTokenAddressedOnlyToThePlatformAudienceIsAccepted() {
+  void aTokenAddressedToThePlatformAudienceIsAccepted() {
     given()
         .header("Authorization", "Bearer " + token("qits-platform"))
         .queryParam("path", SOME_ENTRY)
@@ -103,10 +104,13 @@ class MachinePlatformAudienceTest {
   }
 
   @Test
-  void aTokenForNeitherAudienceIsStillRejected() {
-    // The negative control: without it, a broken audience check would pass this test file too.
+  void aTokenForAnAudienceThatIsNotThisPlatformIsRejected() {
+    // The negative control: without it, a broken audience check would pass this test file too. The
+    // audience is deliberately not a sibling service's — a peer on this platform carries
+    // qits-platform as well and is admitted here, with its roles deciding what it may do. What this
+    // asserts is the outer edge: a token addressed to something that is not this platform at all.
     given()
-        .header("Authorization", "Bearer " + token("some-other-service"))
+        .header("Authorization", "Bearer " + token("some-other-platform"))
         .queryParam("path", SOME_ENTRY)
         .when()
         .delete(DOOR)

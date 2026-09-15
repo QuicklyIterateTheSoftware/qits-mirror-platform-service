@@ -23,10 +23,10 @@ import jakarta.ws.rs.core.MediaType;
  * cache that authenticated its readers would be a cache nothing could read. This one writes, so it
  * takes the platform's operator-door idiom, which is {@code @RolesAllowed} over an identity
  * qits-auth-core assembles from qits-gateway's {@code X-Qits-User} / {@code X-Qits-Roles} or from a
- * bearer minted for {@code qits-platform-mirror}. Two roles, because both callers are real: {@code
- * qits:admin} is the operator clearing a fault from the explorer, {@code qits:system} is a repair job
- * doing the same thing without a person. See the identity block in application.properties for why the
- * guard is an annotation on this method and never a path policy.
+ * bearer carrying the platform audience {@code qits-platform}. Two roles, because both callers are
+ * real: {@code qits:admin} is the operator clearing a fault from the explorer, {@code qits:system}
+ * is a repair job doing the same thing without a person. See the identity block in
+ * application.properties for why the guard is an annotation on this method and never a path policy.
  *
  * <p><b>Nothing is caught here</b>, exactly as in {@link RepositoriesResource}. {@link
  * MirrorEntryEviction} throws the refusal it means, with its reason in the body, and a database that
