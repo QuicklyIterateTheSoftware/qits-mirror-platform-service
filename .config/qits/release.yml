@@ -57,7 +57,6 @@ release-request:
   # directly. Set explicitly rather than left unset so no ambient value can switch it back on.
   - image: qits/build-images/maven-base:latest
     user: build
-    gating: false
     timeout-seconds: 3600
     script: |
       export QITS_MAVEN_REPOSITORY_URL="$QITS_MAVEN_REGISTRY_URL"
