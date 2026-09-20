@@ -68,8 +68,18 @@ release-request:
         "-Dit.test=PullThroughBootstrapIT,MavenPullThroughIT,NpmInstallThroughTheMirrorIT,ImagePullThroughIT,CacheInventoryIT,StaleThroughAnOutageIT,UpstreamRefusalIT"
       # SINGLE-MODULE: the stories land in target/userstories.
       tar -czf /tmp/userstories.tgz -C target/userstories .
+      publish_token=""
+      if [ -n "${QITS_PUBLISH_TOKEN_COMMAND:-}" ] \
+        && command -v "$QITS_PUBLISH_TOKEN_COMMAND" >/dev/null 2>&1; then
+        publish_token=$("$QITS_PUBLISH_TOKEN_COMMAND" 2>/dev/null) || publish_token=""
+      fi
+      set --
+      if [ -n "$publish_token" ]; then
+        set -- -H "Authorization: Bearer $publish_token"
+      fi
+
       status=$(curl -sS -o /tmp/docs-publish.out -w '%{http_code}' \
-        -X PUT --data-binary @/tmp/userstories.tgz \
+        -X PUT --data-binary @/tmp/userstories.tgz "$@" \
         -H "X-Artifacts-Meta-git.branch.name: $QITS_CI_BRANCH" \
         -H "X-Artifacts-Meta-git.commit.hash: $QITS_CI_SHA" \
         -H "X-Artifacts-Meta-git.repository.name: qits-mirror-platform-service" \
