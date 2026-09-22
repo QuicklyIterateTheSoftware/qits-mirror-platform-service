@@ -111,7 +111,7 @@
              repository, ~350 lines, which that class's javadoc justifies line by line. MockService
              remains the right tool for standing in for another JSON API; a cache's upstream is a
              byte store, which is a different job. -->
-        <qits.userflows.version>2026.920.210236</qits.userflows.version>
+        <qits.userflows.version>2026.922.190204</qits.userflows.version>
 
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
