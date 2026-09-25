@@ -37,7 +37,17 @@ navigation-entries: system.Mirror:2
 # behind them. Without this line the container has no database and dies at Flyway's migrate-at-start
 # naming the missing variable — which is the failure worth having: a cache that invented an empty
 # store would answer every lookup as a miss, refetch the internet on every build, and report nothing.
-resources: postgresql:db
+# THE DATABASE IS NAMED EXPLICITLY, AND IT IS A SAFETY PIN RATHER THAN A PREFERENCE.
+# `postgresql:db` with no third segment DERIVES the database from the APPLICATION name —
+# `qits_` plus the name minus its `qits-` prefix. This application is about to be renamed
+# (qits-platform-mirror -> qits-mirror), and a derived name follows it: the deployment would provision a
+# BRAND NEW EMPTY `qits_mirror` and start against it, on a green deploy, with nothing failing.
+# Naming the database this application already uses makes the rename a rename of the
+# APPLICATION alone, which is the whole intent.
+#
+# VERIFIED AGAINST THE SERVER, not derived: `qits_platform_mirror` is in pg_database on
+# qits-oci-postgresql today, and `qits_mirror` is not.
+resources: postgresql:db:qits_platform_mirror
 
 # THE PROBE THE DEPLOY GATES ON, SPELLED OUT BECAUSE THE DERIVED DEFAULT IS WRONG. The default would
 # be /platform-mirror/q/health/ready — the repository name minus `qits-`; this application serves its
