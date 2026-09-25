@@ -78,7 +78,7 @@ import java.util.Map;
  *       happened to start then would be deleting rows underneath the stories.
  *   <li><b>OTel</b> — dark outside a deployment, like {@code %dev}/{@code %test}. A neutralisation
  *       and not tidiness: the shipped config points the exporter at {@code
- *       http://qits-observability:8080}, a name that resolves on qits-net and nowhere else, and an
+ *       http://dev-qits-observability:8080}, a name that resolves on qits-net and nowhere else, and an
  *       exporter flushes on a schedule of its own, on its own thread, so its batches would draw
  *       arrows into whichever story happened to be open — a {@code networkHash} that never settles.
  *       So <b>no story here covers this service's self-export</b>, and none claims its absence
