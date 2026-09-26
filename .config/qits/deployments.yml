@@ -9,7 +9,7 @@
 # Every derivation the deployer makes hangs off this name — the wire alias peers dial, the container
 # it manages, the extras family, the database — so letting it follow the repository would
 # decommission the running service and start a stranger beside it.
-application: qits-mirror
+application: qits-platform-mirror
 
 # One route for this application's machine surface: the admin API at /mirror/api and health at
 # /mirror/q. The edge path-routes every application's route prefix on EVERY host, so this one line
