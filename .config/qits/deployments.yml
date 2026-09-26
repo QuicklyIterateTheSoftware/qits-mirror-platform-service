@@ -22,7 +22,7 @@ routes: /mirror
 # the platform rather than about one project — and 2 is the position inside it.
 #
 # The host is not spelled because the derived one is already right: the application name minus its
-# `qits-` prefix is `mirror`, which is the label dockerd, npm and maven already dial. It used to be
+# `qits-platform-` prefix is `mirror`, which is the label dockerd, npm and maven already dial. It used to be
 # the name minus `qits-platform-`, and the label did not move when the prefix went — which is the
 # point of deriving it. The browser plane and the machine plane land on the same authority by
 # design, not by accident.
@@ -41,7 +41,7 @@ navigation-entries: system.Mirror:2
 # store would answer every lookup as a miss, refetch the internet on every build, and report nothing.
 # THE DATABASE IS NAMED EXPLICITLY, AND IT IS A SAFETY PIN RATHER THAN A PREFERENCE.
 # `postgresql:db` with no third segment DERIVES the database from the APPLICATION name —
-# `qits_` plus the name minus its `qits-` prefix. The application HAS now been renamed
+# `qits_` plus the name minus its `qits-` prefix. This application is STILL TO BE renamed
 # (qits-platform-mirror -> qits-mirror), so a derived name would ask for `qits_mirror`: the deployment
 # would provision a BRAND NEW EMPTY database and start against it, on a green deploy, with nothing
 # failing and every cached byte unreachable. This line is what makes the rename a rename of the
