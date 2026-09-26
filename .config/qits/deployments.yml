@@ -9,7 +9,7 @@
 # Every derivation the deployer makes hangs off this name — the wire alias peers dial, the container
 # it manages, the extras family, the database — so letting it follow the repository would
 # decommission the running service and start a stranger beside it.
-application: qits-platform-mirror
+application: qits-mirror
 
 # One route for this application's machine surface: the admin API at /mirror/api and health at
 # /mirror/q. The edge path-routes every application's route prefix on EVERY host, so this one line
@@ -22,8 +22,10 @@ routes: /mirror
 # the platform rather than about one project — and 2 is the position inside it.
 #
 # The host is not spelled because the derived one is already right: the application name minus its
-# `qits-platform-` prefix is `mirror`, which is the label dockerd, npm and maven already dial. The
-# browser plane and the machine plane land on the same authority by design, not by accident.
+# `qits-` prefix is `mirror`, which is the label dockerd, npm and maven already dial. It used to be
+# the name minus `qits-platform-`, and the label did not move when the prefix went — which is the
+# point of deriving it. The browser plane and the machine plane land on the same authority by
+# design, not by accident.
 navigation-entries: system.Mirror:2
 
 # A postgres role and database of this application's own, created on the tier's postgres BEFORE the
@@ -39,11 +41,12 @@ navigation-entries: system.Mirror:2
 # store would answer every lookup as a miss, refetch the internet on every build, and report nothing.
 # THE DATABASE IS NAMED EXPLICITLY, AND IT IS A SAFETY PIN RATHER THAN A PREFERENCE.
 # `postgresql:db` with no third segment DERIVES the database from the APPLICATION name —
-# `qits_` plus the name minus its `qits-` prefix. This application is about to be renamed
-# (qits-platform-mirror -> qits-mirror), and a derived name follows it: the deployment would provision a
-# BRAND NEW EMPTY `qits_mirror` and start against it, on a green deploy, with nothing failing.
-# Naming the database this application already uses makes the rename a rename of the
-# APPLICATION alone, which is the whole intent.
+# `qits_` plus the name minus its `qits-` prefix. The application HAS now been renamed
+# (qits-platform-mirror -> qits-mirror), so a derived name would ask for `qits_mirror`: the deployment
+# would provision a BRAND NEW EMPTY database and start against it, on a green deploy, with nothing
+# failing and every cached byte unreachable. This line is what makes the rename a rename of the
+# APPLICATION alone, which is the whole intent — and it has to OUTLIVE the rename, not just precede
+# it. Removing it later is not a tidy-up; it is a silent migration to an empty store.
 #
 # VERIFIED AGAINST THE SERVER, not derived: `qits_platform_mirror` is in pg_database on
 # qits-oci-postgresql today, and `qits_mirror` is not.
@@ -73,5 +76,6 @@ health_path: /mirror/q/health/ready
 # does — so a one-node swarm deadlocks on the first rolling update. A single binder cannot have
 # the lossless-rollback overlap; the deploy takes the brief gap instead. Measured live on
 # qits-platform-mirror's 2026.813.163303 deploy, the first host-port update since the swarm
-# cutover (2026-08-13).
+# cutover (2026-08-13). The publish itself has since gone — the byte plane answers through the edge
+# and publishes nothing — so this is now belt rather than the load-bearing line it was.
 update_order: stop-first
